@@ -16,6 +16,7 @@ if (!file_exists($configFile)) {
     exit;
 }
 require $configFile; // definiert SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_TO
+// optional, sobald eingerichtet: TURNSTILE_SECRET_KEY
 
 require __DIR__ . '/lib/PHPMailer/src/Exception.php';
 require __DIR__ . '/lib/PHPMailer/src/PHPMailer.php';
@@ -29,16 +30,61 @@ function field(string $name): string
     return trim((string)($_POST[$name] ?? ''));
 }
 
-$name = field('name');
-$email = field('email');
-$message = field('message');
-$consent = field('consent') !== '';
+// --- Spam-Abwehr ---------------------------------------------------------
 
-// Honeypot: verstecktes Feld, das nur Bots ausfüllen. Bei Treffer stillschweigend "Erfolg" vortäuschen.
-if (field('website') !== '') {
+// Honeypot: unauffällig benanntes, unsichtbares Feld. Bots füllen oft blind
+// alle Felder aus; echte Besucher sehen und berühren es nie.
+$isHoneypotTriggered = field('hp_confirm2') !== '';
+
+// Zeit-Prüfung: Formulare, die schneller als 3s nach dem Laden abgeschickt
+// werden, stammen praktisch nie von einem Menschen.
+$renderedAt = (float) field('ts');
+$isTooFast = $renderedAt > 0 && (microtime(true) * 1000 - $renderedAt) < 3000;
+
+if ($isHoneypotTriggered || $isTooFast) {
+    // Bots nicht verraten, dass sie erkannt wurden – stillschweigend "Erfolg" melden.
     echo json_encode(['ok' => true]);
     exit;
 }
+
+// Cloudflare Turnstile (aktiv, sobald TURNSTILE_SECRET_KEY in smtp_config.php gesetzt ist)
+if (defined('TURNSTILE_SECRET_KEY') && TURNSTILE_SECRET_KEY !== '') {
+    $token = field('cf-turnstile-response');
+    $verified = false;
+    if ($token !== '') {
+        $payload = http_build_query([
+            'secret' => TURNSTILE_SECRET_KEY,
+            'response' => $token,
+            'remoteip' => $_SERVER['REMOTE_ADDR'] ?? '',
+        ]);
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => 'Content-Type: application/x-www-form-urlencoded',
+                'content' => $payload,
+                'timeout' => 8,
+            ],
+        ]);
+        $result = @file_get_contents('https://challenges.cloudflare.com/turnstile/v0/siteverify', false, $context);
+        if ($result !== false) {
+            $decoded = json_decode($result, true);
+            $verified = is_array($decoded) && !empty($decoded['success']);
+        }
+    }
+    if (!$verified) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'error' => 'Bitte bestätigen Sie die Sicherheitsabfrage.']);
+        exit;
+    }
+}
+
+// --- Eingaben validieren ---------------------------------------------------
+
+$name = field('name');
+$email = field('email');
+$phone = field('phone');
+$message = field('message');
+$consent = field('consent') !== '';
 
 $errors = [];
 if ($name === '') {
@@ -60,6 +106,8 @@ if ($errors) {
     exit;
 }
 
+// --- E-Mail an die Praxis ---------------------------------------------------
+
 $mail = new PHPMailer(true);
 try {
     $mail->isSMTP();
@@ -76,12 +124,53 @@ try {
     $mail->addReplyTo($email, $name);
 
     $mail->Subject = 'Anfrage über die Website – ' . $name;
-    $mail->Body = "Name: {$name}\nE-Mail: {$email}\n\nNachricht:\n{$message}\n";
+    $bodyLines = ["Name: {$name}", "E-Mail: {$email}"];
+    if ($phone !== '') {
+        $bodyLines[] = "Telefon: {$phone}";
+    }
+    $bodyLines[] = '';
+    $bodyLines[] = 'Nachricht:';
+    $bodyLines[] = $message;
+    $mail->Body = implode("\n", $bodyLines) . "\n";
 
     $mail->send();
-    echo json_encode(['ok' => true]);
 } catch (PHPMailerException $e) {
     http_response_code(500);
     error_log('Kontaktformular Mailversand fehlgeschlagen: ' . $mail->ErrorInfo);
     echo json_encode(['ok' => false, 'error' => 'Die Nachricht konnte nicht gesendet werden. Bitte versuchen Sie es später erneut oder schreiben Sie direkt eine E-Mail.']);
+    exit;
 }
+
+// --- Automatische Eingangsbestätigung an den Absender ----------------------
+// Best effort: Wenn das fehlschlägt, ist die Hauptanfrage trotzdem schon
+// erfolgreich zugestellt – der Besucher bekommt keinen Fehler zu sehen.
+try {
+    $confirm = new PHPMailer(true);
+    $confirm->isSMTP();
+    $confirm->Host = SMTP_HOST;
+    $confirm->SMTPAuth = true;
+    $confirm->Username = SMTP_USER;
+    $confirm->Password = SMTP_PASS;
+    $confirm->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+    $confirm->Port = SMTP_PORT;
+    $confirm->CharSet = 'UTF-8';
+
+    $confirm->setFrom(SMTP_USER, 'Gabriele Küppers – Selbstbetrachtung');
+    $confirm->addAddress($email, $name);
+
+    $confirm->Subject = 'Ihre Anfrage bei Selbstbetrachtung ist eingegangen';
+    $confirm->Body =
+        "Liebe/r {$name},\n\n" .
+        "vielen Dank für Ihre Nachricht über selbstbetrachtung-online.de. Sie ist bei mir angekommen " .
+        "und ich melde mich in der Regel innerhalb von 24–48 Stunden bei Ihnen zurück.\n\n" .
+        "Diese Bestätigung wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
+        "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
+        "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n\n" .
+        "--\nIhre Nachricht im Wortlaut:\n{$message}\n";
+
+    $confirm->send();
+} catch (PHPMailerException $e) {
+    error_log('Eingangsbestätigung an Absender fehlgeschlagen: ' . $confirm->ErrorInfo);
+}
+
+echo json_encode(['ok' => true]);
