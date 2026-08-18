@@ -77,7 +77,7 @@ declare(strict_types=1);
   .slots-grid button:hover{ border-color:var(--gold); }
   .slots-grid button.selected{ background:var(--gold); border-color:var(--gold); color:#fff; }
   .slots-empty{ color:var(--ink-mute); }
-  .slots-hint{ color:var(--ink-mute); font-size:.85rem; margin-top:1rem; padding-top:.75rem; border-top:1px solid var(--cream-dark); }
+  .slots-hint{ color:var(--ink-mute); font-size:.9rem; font-weight:600; margin:0 0 1rem; }
 
   .booking-form label{ display:block; margin-bottom:1rem; font-weight:600; font-size:.92rem; }
   .booking-form input[type=text], .booking-form input[type=email], .booking-form input[type=tel], .booking-form textarea{
@@ -139,9 +139,9 @@ declare(strict_types=1);
 
     <div class="slots-card" id="slotsSection" hidden>
       <h2>Verfügbare Uhrzeiten am <span id="selectedDateLabel"></span></h2>
+      <p class="slots-hint">Sollte kein Termin in Ihrem gewünschten Zeitfenster frei sein, kontaktieren Sie mich gerne direkt über das <a href="/#kontakt">Kontaktformular</a>.</p>
       <div class="slots-grid" id="slotsGrid"></div>
       <p class="slots-empty" id="slotsEmpty" hidden>An diesem Tag sind leider keine Termine mehr frei.</p>
-      <p class="slots-hint">Sollte kein Termin in Ihrem gewünschten Zeitfenster frei sein, kontaktieren Sie mich gerne direkt über das <a href="/#kontakt">Kontaktformular</a>.</p>
     </div>
 
     <form class="booking-form" id="bookingForm" hidden>
