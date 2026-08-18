@@ -24,6 +24,9 @@ final class Booking
     /** Raster für Slot-Kandidaten (Minuten) */
     public const SLOT_GRID_MINUTES = 15;
 
+    /** Pufferzeit vor/nach jedem bestehenden Termin zur Nachbereitung (Minuten) */
+    public const BOOKING_BUFFER_MINUTES = 30;
+
     private static ?PDO $pdo = null;
 
     public static function db(): PDO
@@ -197,10 +200,18 @@ final class Booking
             return [];
         }
 
-        // Bestehende belegte Intervalle an diesem Tag
+        // Bestehende belegte Intervalle an diesem Tag, inkl. Pufferzeit vor/nach jedem Termin
+        // (BOOKING_BUFFER_MINUTES) zur Nachbereitung – gilt symmetrisch, damit jeder Termin,
+        // egal in welcher Reihenfolge gebucht, seine Pufferzeit zum jeweils nächsten behält.
         $stmt = $pdo->prepare('SELECT start_time, end_time FROM bookings WHERE date = :date AND status = \'confirmed\'');
         $stmt->execute(['date' => $date]);
-        $busy = $stmt->fetchAll();
+        $busyRanges = [];
+        foreach ($stmt->fetchAll() as $b) {
+            $busyRanges[] = [
+                self::toMinutes($b['start_time']) - self::BOOKING_BUFFER_MINUTES,
+                self::toMinutes($b['end_time']) + self::BOOKING_BUFFER_MINUTES,
+            ];
+        }
 
         $earliestStart = self::now()->modify('+' . self::MIN_LEAD_HOURS . ' hours');
         $earliestDateStr = $earliestStart->format('Y-m-d');
@@ -208,30 +219,29 @@ final class Booking
             // Der ganze Tag liegt innerhalb der Mindestvorlaufzeit.
             return [];
         }
-        $earliestOnThisDate = $date === $earliestDateStr ? $earliestStart->format('H:i') : null;
+        $earliestOnThisDate = $date === $earliestDateStr ? self::toMinutes($earliestStart->format('H:i')) : null;
 
         $slots = [];
         foreach ($rules as $rule) {
             $cursor = self::toMinutes($rule['start_time']);
             $windowEnd = self::toMinutes($rule['end_time']);
             while ($cursor + $duration <= $windowEnd) {
-                $startStr = self::fromMinutes($cursor);
-                $endStr = self::fromMinutes($cursor + $duration);
+                $candEnd = $cursor + $duration;
 
                 $ok = true;
-                if ($earliestOnThisDate !== null && $startStr < $earliestOnThisDate) {
+                if ($earliestOnThisDate !== null && $cursor < $earliestOnThisDate) {
                     $ok = false;
                 }
                 if ($ok) {
-                    foreach ($busy as $b) {
-                        if (!($endStr <= $b['start_time'] || $startStr >= $b['end_time'])) {
+                    foreach ($busyRanges as [$bStart, $bEnd]) {
+                        if (!($candEnd <= $bStart || $cursor >= $bEnd)) {
                             $ok = false;
                             break;
                         }
                     }
                 }
                 if ($ok) {
-                    $slots[] = $startStr;
+                    $slots[] = self::fromMinutes($cursor);
                 }
                 $cursor += self::SLOT_GRID_MINUTES;
             }
@@ -426,10 +436,57 @@ final class Booking
         $stmt->execute(['d' => $date, 'r' => $reason]);
     }
 
+    /**
+     * Sperrt jeden Tag zwischen $dateFrom und $dateTo (inklusive) ganztägig.
+     *
+     * @return array{ok:bool, added:int}
+     */
+    public static function addBlockedDateRange(PDO $pdo, string $dateFrom, string $dateTo, string $reason): array
+    {
+        $dates = self::dateRange($dateFrom, $dateTo);
+        if (!$dates) {
+            return ['ok' => false, 'added' => 0];
+        }
+        foreach ($dates as $d) {
+            self::addBlockedDate($pdo, $d, $reason);
+        }
+        return ['ok' => true, 'added' => count($dates)];
+    }
+
     public static function deleteBlockedDate(PDO $pdo, int $id): void
     {
         $stmt = $pdo->prepare('DELETE FROM blocked_dates WHERE id = :id');
         $stmt->execute(['id' => $id]);
+    }
+
+    /**
+     * Liefert alle Tage von $from bis $to (inklusive) als \'YYYY-MM-DD\'-Strings.
+     * Leeres Array bei ungültiger Eingabe oder einem Zeitraum über 366 Tagen (Schutz
+     * vor versehentlichem Massen-Anlegen bei vertauschten/falschen Daten).
+     *
+     * @return string[]
+     */
+    private static function dateRange(string $from, string $to): array
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            return [];
+        }
+        $tz = new DateTimeZone('Europe/Berlin');
+        $start = DateTimeImmutable::createFromFormat('!Y-m-d', $from, $tz);
+        $end = DateTimeImmutable::createFromFormat('!Y-m-d', $to, $tz);
+        if (!$start || !$end || $end < $start) {
+            return [];
+        }
+        if ($start->diff($end)->days > 366) {
+            return [];
+        }
+        $dates = [];
+        $cursor = $start;
+        while ($cursor <= $end) {
+            $dates[] = $cursor->format('Y-m-d');
+            $cursor = $cursor->modify('+1 day');
+        }
+        return $dates;
     }
 
     // ------------------------------------------------------------------
@@ -447,12 +504,16 @@ final class Booking
 
         $pdo->exec('BEGIN IMMEDIATE');
         try {
+            $startMin = self::toMinutes($start);
+            $endMin = self::toMinutes($end);
             $stmt = $pdo->prepare('SELECT start_time, end_time FROM bookings WHERE date = :date AND status = \'confirmed\'');
             $stmt->execute(['date' => $date]);
             foreach ($stmt->fetchAll() as $b) {
-                if (!($end <= $b['start_time'] || $start >= $b['end_time'])) {
+                $bStart = self::toMinutes($b['start_time']) - self::BOOKING_BUFFER_MINUTES;
+                $bEnd = self::toMinutes($b['end_time']) + self::BOOKING_BUFFER_MINUTES;
+                if (!($endMin <= $bStart || $startMin >= $bEnd)) {
                     $pdo->exec('ROLLBACK');
-                    return ['ok' => false, 'error' => 'Überschneidet sich mit einem bestehenden Termin.'];
+                    return ['ok' => false, 'error' => 'Überschneidet sich mit einem bestehenden Termin (inkl. 30 Min. Pufferzeit).'];
                 }
             }
             $token = bin2hex(random_bytes(24));
@@ -474,6 +535,33 @@ final class Booking
             $pdo->exec('ROLLBACK');
             return ['ok' => false, 'error' => 'Konnte nicht gespeichert werden.'];
         }
+    }
+
+    /**
+     * Blockiert dieselbe Uhrzeit an jedem Tag zwischen $dateFrom und $dateTo (inklusive) –
+     * z. B. jeden Vormittag einer Fortbildungswoche. Tage, die sich mit einem bestehenden
+     * Termin überschneiden, werden übersprungen und in \'failed\' gemeldet statt den ganzen
+     * Zeitraum abzubrechen.
+     *
+     * @return array{ok:bool, added:int, failed:array<int,array{date:string,error:string}>}
+     */
+    public static function addManualBlockRange(PDO $pdo, string $dateFrom, string $dateTo, string $start, string $end, string $reason): array
+    {
+        $dates = self::dateRange($dateFrom, $dateTo);
+        if (!$dates) {
+            return ['ok' => false, 'added' => 0, 'failed' => [['date' => $dateFrom, 'error' => 'Ungültiger Zeitraum.']]];
+        }
+        $added = 0;
+        $failed = [];
+        foreach ($dates as $d) {
+            $result = self::addManualBlock($pdo, $d, $start, $end, $reason);
+            if ($result['ok']) {
+                $added++;
+            } else {
+                $failed[] = ['date' => $d, 'error' => $result['error']];
+            }
+        }
+        return ['ok' => $added > 0, 'added' => $added, 'failed' => $failed];
     }
 
     public const WEEKDAYS = [0 => 'Sonntag', 1 => 'Montag', 2 => 'Dienstag', 3 => 'Mittwoch', 4 => 'Donnerstag', 5 => 'Freitag', 6 => 'Samstag'];

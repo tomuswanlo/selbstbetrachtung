@@ -78,10 +78,15 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     }
 
     if ($do === 'add_blocked_date') {
-        $date = trim((string) ($_POST['date'] ?? ''));
+        $dateFrom = trim((string) ($_POST['date_from'] ?? ''));
+        $dateTo = trim((string) ($_POST['date_to'] ?? ''));
         $reason = trim((string) ($_POST['reason'] ?? ''));
-        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            Booking::addBlockedDate($pdo, $date, $reason);
+        if ($dateTo === '') {
+            $dateTo = $dateFrom;
+        }
+        $result = Booking::addBlockedDateRange($pdo, $dateFrom, $dateTo, $reason);
+        if (!$result['ok']) {
+            $_SESSION['flash_error'] = 'Ungültiger Zeitraum.';
         }
         redirectBack();
     }
@@ -92,13 +97,23 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     }
 
     if ($do === 'add_manual_block') {
-        $date = trim((string) ($_POST['date'] ?? ''));
+        $dateFrom = trim((string) ($_POST['date_from'] ?? ''));
+        $dateTo = trim((string) ($_POST['date_to'] ?? ''));
         $start = trim((string) ($_POST['start_time'] ?? ''));
         $end = trim((string) ($_POST['end_time'] ?? ''));
         $reason = trim((string) ($_POST['reason'] ?? ''));
-        $result = Booking::addManualBlock($pdo, $date, $start, $end, $reason);
-        if (!$result['ok']) {
-            $_SESSION['flash_error'] = $result['error'];
+        if ($dateTo === '') {
+            $dateTo = $dateFrom;
+        }
+        $result = Booking::addManualBlockRange($pdo, $dateFrom, $dateTo, $start, $end, $reason);
+        if ($result['added'] === 0) {
+            $_SESSION['flash_error'] = 'Konnte nicht gespeichert werden: ' . ($result['failed'][0]['error'] ?? 'Ungültiger Zeitraum.');
+        } elseif ($result['failed']) {
+            $days = implode(', ', array_map(
+                static fn(array $f): string => (new DateTimeImmutable($f['date']))->format('d.m.'),
+                $result['failed']
+            ));
+            $_SESSION['flash_error'] = $result['added'] . ' Tag(e) geblockt, ' . count($result['failed']) . ' Tag(e) übersprungen (Überschneidung mit bestehendem Termin): ' . $days;
         }
         redirectBack();
     }
@@ -184,6 +199,7 @@ $csrf = $isLoggedIn ? csrfToken() : '';
 
   <section class="card">
     <h2>Wöchentliche Verfügbarkeit</h2>
+    <p class="muted">Zwischen zwei Terminen wird automatisch <?= Booking::BOOKING_BUFFER_MINUTES ?> Minuten Pufferzeit zur Nachbereitung freigehalten – das muss hier nicht extra eingeplant werden.</p>
     <table>
       <thead><tr><th>Wochentag</th><th>Von</th><th>Bis</th><th></th></tr></thead>
       <tbody>
@@ -246,21 +262,23 @@ $csrf = $isLoggedIn ? csrfToken() : '';
     <form class="inline" method="post">
       <input type="hidden" name="do" value="add_blocked_date">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <label>Datum <input type="date" name="date" required></label>
+      <label>Von <input type="date" name="date_from" required></label>
+      <label>Bis (optional, für mehrere Tage) <input type="date" name="date_to"></label>
       <label>Grund <input type="text" name="reason" placeholder="z. B. Urlaub"></label>
       <button type="submit" class="btn">Sperren</button>
     </form>
   </section>
 
   <section class="card">
-    <h2>Einzelnen Zeitraum blockieren</h2>
-    <p class="muted">Für private Termine, die nicht über die Website gebucht wurden.</p>
+    <h2>Zeitraum blockieren</h2>
+    <p class="muted">Für private Termine, die nicht über die Website gebucht wurden. Mit „Bis“ lässt sich dieselbe Uhrzeit über mehrere Tage blockieren (z. B. jeden Vormittag einer Fortbildungswoche).</p>
     <form class="inline" method="post">
       <input type="hidden" name="do" value="add_manual_block">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <label>Datum <input type="date" name="date" required></label>
-      <label>Von <input type="time" name="start_time" required></label>
-      <label>Bis <input type="time" name="end_time" required></label>
+      <label>Von <input type="date" name="date_from" required></label>
+      <label>Bis (optional, für mehrere Tage) <input type="date" name="date_to"></label>
+      <label>Uhrzeit von <input type="time" name="start_time" required></label>
+      <label>Uhrzeit bis <input type="time" name="end_time" required></label>
       <label>Grund <input type="text" name="reason" placeholder="z. B. Fortbildung"></label>
       <button type="submit" class="btn">Blockieren</button>
     </form>
