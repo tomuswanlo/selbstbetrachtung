@@ -62,12 +62,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['do'] ?? '') === 'logout') 
 if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     $do = $_POST['do'] ?? '';
 
-    if ($do === 'add_rule') {
+    if ($do === 'add_rule' || $do === 'update_rule') {
         $weekday = (int) ($_POST['weekday'] ?? -1);
         $start = trim((string) ($_POST['start_time'] ?? ''));
         $end = trim((string) ($_POST['end_time'] ?? ''));
         if ($weekday >= 0 && $weekday <= 6 && preg_match('/^\d{2}:\d{2}$/', $start) && preg_match('/^\d{2}:\d{2}$/', $end) && $end > $start) {
-            Booking::addRule($pdo, $weekday, $start, $end);
+            if ($do === 'update_rule') {
+                Booking::updateRule($pdo, (int) ($_POST['id'] ?? 0), $weekday, $start, $end);
+            } else {
+                Booking::addRule($pdo, $weekday, $start, $end);
+            }
+        } else {
+            $_SESSION['flash_error'] = 'Ungültige Zeiten (Ende muss nach Start liegen).';
         }
         redirectBack();
     }
@@ -87,6 +93,20 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         $result = Booking::addBlockedDateRange($pdo, $dateFrom, $dateTo, $reason);
         if (!$result['ok']) {
             $_SESSION['flash_error'] = 'Ungültiger Zeitraum.';
+        }
+        redirectBack();
+    }
+
+    if ($do === 'update_blocked_date') {
+        $date = trim((string) ($_POST['date_from'] ?? ''));
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $result = Booking::updateBlockedDate($pdo, (int) ($_POST['id'] ?? 0), $date, $reason);
+            if (!$result['ok']) {
+                $_SESSION['flash_error'] = $result['error'];
+            }
+        } else {
+            $_SESSION['flash_error'] = 'Ungültiges Datum.';
         }
         redirectBack();
     }
@@ -131,6 +151,28 @@ $rules = $isLoggedIn ? Booking::listRules($pdo) : [];
 $blockedDates = $isLoggedIn ? Booking::listBlockedDates($pdo) : [];
 $upcoming = $isLoggedIn ? Booking::listUpcoming($pdo) : [];
 $csrf = $isLoggedIn ? csrfToken() : '';
+
+// Bearbeiten-Modus: welche Zeile (falls vorhanden) wird gerade im Formular vorausgefüllt?
+$editRule = null;
+if (isset($_GET['edit_rule'])) {
+    $editRuleId = (int) $_GET['edit_rule'];
+    foreach ($rules as $r) {
+        if ((int) $r['id'] === $editRuleId) {
+            $editRule = $r;
+            break;
+        }
+    }
+}
+$editBlocked = null;
+if (isset($_GET['edit_blocked'])) {
+    $editBlockedId = (int) $_GET['edit_blocked'];
+    foreach ($blockedDates as $b) {
+        if ((int) $b['id'] === $editBlockedId) {
+            $editBlocked = $b;
+            break;
+        }
+    }
+}
 ?><!DOCTYPE html>
 <html lang="de">
 <head>
@@ -197,7 +239,7 @@ $csrf = $isLoggedIn ? csrfToken() : '';
   <h1>Terminverwaltung</h1>
   <?php if ($flashError): ?><p class="error"><?= htmlspecialchars($flashError) ?></p><?php endif; ?>
 
-  <section class="card">
+  <section class="card" id="wochenzeiten">
     <h2>Wöchentliche Verfügbarkeit</h2>
     <p class="muted">Zwischen zwei Terminen wird automatisch <?= Booking::BOOKING_BUFFER_MINUTES ?> Minuten Pufferzeit zur Nachbereitung freigehalten – das muss hier nicht extra eingeplant werden.</p>
     <table>
@@ -208,7 +250,8 @@ $csrf = $isLoggedIn ? csrfToken() : '';
           <td><?= htmlspecialchars(Booking::WEEKDAYS[(int) $r['weekday']]) ?></td>
           <td><?= htmlspecialchars($r['start_time']) ?></td>
           <td><?= htmlspecialchars($r['end_time']) ?></td>
-          <td>
+          <td style="display:flex; gap:.4rem;">
+            <a class="btn" style="text-decoration:none" href="?edit_rule=<?= (int) $r['id'] ?>#wochenzeiten">Bearbeiten</a>
             <form method="post" style="margin:0" onsubmit="return confirm('Diese Regel wirklich löschen?');">
               <input type="hidden" name="do" value="delete_rule">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
@@ -222,22 +265,24 @@ $csrf = $isLoggedIn ? csrfToken() : '';
       </tbody>
     </table>
     <form class="inline" method="post">
-      <input type="hidden" name="do" value="add_rule">
+      <input type="hidden" name="do" value="<?= $editRule ? 'update_rule' : 'add_rule' ?>">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+      <?php if ($editRule): ?><input type="hidden" name="id" value="<?= (int) $editRule['id'] ?>"><?php endif; ?>
       <label>Wochentag
         <select name="weekday" required>
           <?php foreach ([1,2,3,4,5,6,0] as $wd): ?>
-            <option value="<?= $wd ?>"><?= htmlspecialchars(Booking::WEEKDAYS[$wd]) ?></option>
+            <option value="<?= $wd ?>" <?= $editRule && (int) $editRule['weekday'] === $wd ? 'selected' : '' ?>><?= htmlspecialchars(Booking::WEEKDAYS[$wd]) ?></option>
           <?php endforeach; ?>
         </select>
       </label>
-      <label>Von <input type="time" name="start_time" required></label>
-      <label>Bis <input type="time" name="end_time" required></label>
-      <button type="submit" class="btn">Hinzufügen</button>
+      <label>Von <input type="time" name="start_time" value="<?= $editRule ? htmlspecialchars($editRule['start_time']) : '' ?>" required></label>
+      <label>Bis <input type="time" name="end_time" value="<?= $editRule ? htmlspecialchars($editRule['end_time']) : '' ?>" required></label>
+      <button type="submit" class="btn"><?= $editRule ? 'Speichern' : 'Hinzufügen' ?></button>
+      <?php if ($editRule): ?><a href="termin-admin.php#wochenzeiten" style="color:var(--ink-mute)">Abbrechen</a><?php endif; ?>
     </form>
   </section>
 
-  <section class="card">
+  <section class="card" id="sperrtage">
     <h2>Sperrtage (ganztägig, z. B. Urlaub/Feiertage)</h2>
     <table>
       <thead><tr><th>Datum</th><th>Grund</th><th></th></tr></thead>
@@ -246,7 +291,8 @@ $csrf = $isLoggedIn ? csrfToken() : '';
         <tr>
           <td><?= htmlspecialchars((new DateTimeImmutable($b['date']))->format('d.m.Y')) ?></td>
           <td><?= htmlspecialchars((string) $b['reason']) ?></td>
-          <td>
+          <td style="display:flex; gap:.4rem;">
+            <a class="btn" style="text-decoration:none" href="?edit_blocked=<?= (int) $b['id'] ?>#sperrtage">Bearbeiten</a>
             <form method="post" style="margin:0">
               <input type="hidden" name="do" value="delete_blocked_date">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
@@ -260,12 +306,14 @@ $csrf = $isLoggedIn ? csrfToken() : '';
       </tbody>
     </table>
     <form class="inline" method="post">
-      <input type="hidden" name="do" value="add_blocked_date">
+      <input type="hidden" name="do" value="<?= $editBlocked ? 'update_blocked_date' : 'add_blocked_date' ?>">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <label>Von <input type="date" name="date_from" required></label>
-      <label>Bis (optional, für mehrere Tage) <input type="date" name="date_to"></label>
-      <label>Grund <input type="text" name="reason" placeholder="z. B. Urlaub"></label>
-      <button type="submit" class="btn">Sperren</button>
+      <?php if ($editBlocked): ?><input type="hidden" name="id" value="<?= (int) $editBlocked['id'] ?>"><?php endif; ?>
+      <label>Von <input type="date" name="date_from" value="<?= $editBlocked ? htmlspecialchars($editBlocked['date']) : '' ?>" required></label>
+      <?php if (!$editBlocked): ?><label>Bis (optional, für mehrere Tage) <input type="date" name="date_to"></label><?php endif; ?>
+      <label>Grund <input type="text" name="reason" placeholder="z. B. Urlaub" value="<?= $editBlocked ? htmlspecialchars((string) $editBlocked['reason']) : '' ?>"></label>
+      <button type="submit" class="btn"><?= $editBlocked ? 'Speichern' : 'Sperren' ?></button>
+      <?php if ($editBlocked): ?><a href="termin-admin.php#sperrtage" style="color:var(--ink-mute)">Abbrechen</a><?php endif; ?>
     </form>
   </section>
 

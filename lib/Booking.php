@@ -415,6 +415,12 @@ final class Booking
         $stmt->execute(['w' => $weekday, 's' => $start, 'e' => $end]);
     }
 
+    public static function updateRule(PDO $pdo, int $id, int $weekday, string $start, string $end): void
+    {
+        $stmt = $pdo->prepare('UPDATE availability_rules SET weekday = :w, start_time = :s, end_time = :e WHERE id = :id');
+        $stmt->execute(['w' => $weekday, 's' => $start, 'e' => $end, 'id' => $id]);
+    }
+
     public static function deleteRule(PDO $pdo, int $id): void
     {
         $stmt = $pdo->prepare('DELETE FROM availability_rules WHERE id = :id');
@@ -434,6 +440,18 @@ final class Booking
     {
         $stmt = $pdo->prepare('INSERT OR REPLACE INTO blocked_dates (date, reason) VALUES (:d, :r)');
         $stmt->execute(['d' => $date, 'r' => $reason]);
+    }
+
+    /** @return array{ok:bool,error?:string} */
+    public static function updateBlockedDate(PDO $pdo, int $id, string $date, string $reason): array
+    {
+        try {
+            $stmt = $pdo->prepare('UPDATE blocked_dates SET date = :d, reason = :r WHERE id = :id');
+            $stmt->execute(['d' => $date, 'r' => $reason, 'id' => $id]);
+            return ['ok' => true];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => 'Dieses Datum ist bereits als Sperrtag eingetragen.'];
+        }
     }
 
     /**
