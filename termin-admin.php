@@ -294,11 +294,11 @@ if (isset($_GET['edit_block'])) {
           <td><?= htmlspecialchars((string) $g['reason']) ?: '<span class="muted">–</span>' ?></td>
           <td style="display:flex; gap:.4rem;">
             <a class="btn" style="text-decoration:none" href="?edit_blocked=<?= (int) $g['ids'][0] ?>#sperrtage">Bearbeiten</a>
-            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich löschen?');">
+            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich stornieren?');">
               <input type="hidden" name="do" value="delete_blocked_group">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
               <input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $g['ids'])) ?>">
-              <button type="submit" class="btn btn--danger">Löschen</button>
+              <button type="submit" class="btn btn--danger">Stornieren</button>
             </form>
           </td>
         </tr>
@@ -358,11 +358,11 @@ if (isset($_GET['edit_block'])) {
           <td><?= htmlspecialchars($r['end_time']) ?></td>
           <td style="display:flex; gap:.4rem;">
             <a class="btn" style="text-decoration:none" href="?edit_rule=<?= (int) $r['id'] ?>#wochenzeiten">Bearbeiten</a>
-            <form method="post" style="margin:0" onsubmit="return confirm('Diese Regel wirklich löschen?');">
+            <form method="post" style="margin:0" onsubmit="return confirm('Diese Regel wirklich stornieren?');">
               <input type="hidden" name="do" value="delete_rule">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
               <input type="hidden" name="id" value="<?= (int) $r['id'] ?>">
-              <button type="submit" class="btn btn--danger">Löschen</button>
+              <button type="submit" class="btn btn--danger">Stornieren</button>
             </form>
           </td>
         </tr>
@@ -400,11 +400,11 @@ if (isset($_GET['edit_block'])) {
           <td><?= htmlspecialchars((string) $g['reason']) ?></td>
           <td style="display:flex; gap:.4rem;">
             <a class="btn" style="text-decoration:none" href="?edit_blocked=<?= (int) $g['ids'][0] ?>#sperrtage">Bearbeiten</a>
-            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich löschen?');">
+            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich stornieren?');">
               <input type="hidden" name="do" value="delete_blocked_group">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
               <input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $g['ids'])) ?>">
-              <button type="submit" class="btn btn--danger">Löschen</button>
+              <button type="submit" class="btn btn--danger">Stornieren</button>
             </form>
           </td>
         </tr>
