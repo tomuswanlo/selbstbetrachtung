@@ -98,6 +98,88 @@ final class Booking
             )
         ');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(date, status)');
+
+        // group_id fasst mehrtägige Zeiträume (z.B. eine Urlaubswoche) zu einer Einheit
+        // zusammen, damit sie als eine Zeile "Von–Bis" dargestellt und gemeinsam
+        // bearbeitet/gelöscht werden können.
+        self::ensureColumn($pdo, 'blocked_dates', 'group_id', 'TEXT');
+        self::ensureColumn($pdo, 'bookings', 'group_id', 'TEXT');
+
+        // Einmaliges Nachrüsten: bereits bestehende, zusammenhängende Einträge ohne
+        // group_id (aus der Zeit vor dieser Funktion) rückwirkend zu Gruppen zusammenfassen.
+        self::backfillBlockedDateGroups($pdo);
+        self::backfillBlockGroups($pdo);
+    }
+
+    private static function ensureColumn(PDO $pdo, string $table, string $column, string $type): void
+    {
+        $cols = $pdo->query("PRAGMA table_info($table)")->fetchAll();
+        foreach ($cols as $c) {
+            if ($c['name'] === $column) {
+                return;
+            }
+        }
+        $pdo->exec("ALTER TABLE $table ADD COLUMN $column $type");
+    }
+
+    private static function newGroupId(): string
+    {
+        return bin2hex(random_bytes(8));
+    }
+
+    /** Fasst zusammenhängende Tage ohne group_id (gleicher Grund, direkt aufeinanderfolgend) zusammen. */
+    private static function backfillBlockedDateGroups(PDO $pdo): void
+    {
+        $rows = $pdo->query('SELECT id, date, reason FROM blocked_dates WHERE group_id IS NULL ORDER BY date')->fetchAll();
+        $run = [];
+        foreach ($rows as $row) {
+            if ($run) {
+                $last = $run[count($run) - 1];
+                $expected = (new DateTimeImmutable($last['date']))->modify('+1 day')->format('Y-m-d');
+                if ($row['date'] !== $expected || $row['reason'] !== $last['reason']) {
+                    self::assignGroup($pdo, 'blocked_dates', $run);
+                    $run = [];
+                }
+            }
+            $run[] = $row;
+        }
+        self::assignGroup($pdo, 'blocked_dates', $run);
+    }
+
+    /** Fasst zusammenhängende Zeitraum-Blocker (Buchungen vom Typ \'block\') ohne group_id zusammen. */
+    private static function backfillBlockGroups(PDO $pdo): void
+    {
+        $rows = $pdo->query("SELECT id, date, start_time, end_time, name FROM bookings WHERE type = 'block' AND group_id IS NULL ORDER BY date, start_time")->fetchAll();
+        $run = [];
+        foreach ($rows as $row) {
+            if ($run) {
+                $last = $run[count($run) - 1];
+                $expected = (new DateTimeImmutable($last['date']))->modify('+1 day')->format('Y-m-d');
+                $matches = $row['date'] === $expected
+                    && $row['start_time'] === $last['start_time']
+                    && $row['end_time'] === $last['end_time']
+                    && $row['name'] === $last['name'];
+                if (!$matches) {
+                    self::assignGroup($pdo, 'bookings', $run);
+                    $run = [];
+                }
+            }
+            $run[] = $row;
+        }
+        self::assignGroup($pdo, 'bookings', $run);
+    }
+
+    /** @param array<int,array{id:int}> $run */
+    private static function assignGroup(PDO $pdo, string $table, array $run): void
+    {
+        if (count($run) < 2) {
+            return; // Einzeltage brauchen keine gemeinsame Gruppe
+        }
+        $groupId = self::newGroupId();
+        $stmt = $pdo->prepare("UPDATE $table SET group_id = :g WHERE id = :id");
+        foreach ($run as $row) {
+            $stmt->execute(['g' => $groupId, 'id' => $row['id']]);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -436,26 +518,50 @@ final class Booking
         return $pdo->query('SELECT * FROM blocked_dates ORDER BY date')->fetchAll();
     }
 
-    public static function addBlockedDate(PDO $pdo, string $date, string $reason): void
+    /**
+     * Fasst die einzelnen Tage aus listBlockedDates() zu Gruppen zusammen (ein Eintrag
+     * pro group_id, als Von–Bis dargestellt; Einzeltage ohne Gruppe bleiben für sich).
+     *
+     * @return array<int,array{ids:int[],date_from:string,date_to:string,reason:string}>
+     */
+    public static function listBlockedDateGroups(PDO $pdo): array
     {
-        $stmt = $pdo->prepare('INSERT OR REPLACE INTO blocked_dates (date, reason) VALUES (:d, :r)');
-        $stmt->execute(['d' => $date, 'r' => $reason]);
+        return self::groupRows(self::listBlockedDates($pdo));
     }
 
-    /** @return array{ok:bool,error?:string} */
-    public static function updateBlockedDate(PDO $pdo, int $id, string $date, string $reason): array
+    /** @param array[] $rows Zeilen mit id, date, reason (bereits nach date sortiert) */
+    private static function groupRows(array $rows): array
     {
-        try {
-            $stmt = $pdo->prepare('UPDATE blocked_dates SET date = :d, reason = :r WHERE id = :id');
-            $stmt->execute(['d' => $date, 'r' => $reason, 'id' => $id]);
-            return ['ok' => true];
-        } catch (Throwable $e) {
-            return ['ok' => false, 'error' => 'Dieses Datum ist bereits als Sperrtag eingetragen.'];
+        $groups = [];
+        $index = [];
+        foreach ($rows as $row) {
+            $gid = $row['group_id'] ?? ('single-' . $row['id']);
+            if (!isset($index[$gid])) {
+                $index[$gid] = count($groups);
+                $groups[] = [
+                    'ids' => [],
+                    'date_from' => $row['date'],
+                    'date_to' => $row['date'],
+                    'reason' => $row['reason'],
+                ];
+            }
+            $i = $index[$gid];
+            $groups[$i]['ids'][] = (int) $row['id'];
+            $groups[$i]['date_from'] = min($groups[$i]['date_from'], $row['date']);
+            $groups[$i]['date_to'] = max($groups[$i]['date_to'], $row['date']);
         }
+        return $groups;
+    }
+
+    public static function addBlockedDate(PDO $pdo, string $date, string $reason, ?string $groupId = null): void
+    {
+        $stmt = $pdo->prepare('INSERT OR REPLACE INTO blocked_dates (date, reason, group_id) VALUES (:d, :r, :g)');
+        $stmt->execute(['d' => $date, 'r' => $reason, 'g' => $groupId]);
     }
 
     /**
-     * Sperrt jeden Tag zwischen $dateFrom und $dateTo (inklusive) ganztägig.
+     * Sperrt jeden Tag zwischen $dateFrom und $dateTo (inklusive) ganztägig, als
+     * gemeinsame Gruppe (auch bei nur einem Tag, für einheitliches Bearbeiten/Löschen).
      *
      * @return array{ok:bool, added:int}
      */
@@ -465,16 +571,52 @@ final class Booking
         if (!$dates) {
             return ['ok' => false, 'added' => 0];
         }
+        $groupId = self::newGroupId();
         foreach ($dates as $d) {
-            self::addBlockedDate($pdo, $d, $reason);
+            self::addBlockedDate($pdo, $d, $reason, $groupId);
         }
         return ['ok' => true, 'added' => count($dates)];
     }
 
-    public static function deleteBlockedDate(PDO $pdo, int $id): void
+    /**
+     * Löscht alle Tage der übergebenen IDs und legt den Zeitraum neu an
+     * (einfacher als ein Datumsbereich zu verschieben/erweitern zu versuchen).
+     * Validiert den neuen Zeitraum *vor* dem Löschen, damit bei ungültiger
+     * Eingabe nichts verloren geht.
+     *
+     * @param int[] $ids
+     * @return array{ok:bool,error?:string}
+     */
+    public static function updateBlockedGroup(PDO $pdo, array $ids, string $dateFrom, string $dateTo, string $reason): array
     {
-        $stmt = $pdo->prepare('DELETE FROM blocked_dates WHERE id = :id');
-        $stmt->execute(['id' => $id]);
+        $dates = self::dateRange($dateFrom, $dateTo);
+        if (!$dates) {
+            return ['ok' => false, 'error' => 'Ungültiger Zeitraum.'];
+        }
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            self::deleteBlockedGroup($pdo, $ids);
+            $groupId = self::newGroupId();
+            foreach ($dates as $d) {
+                self::addBlockedDate($pdo, $d, $reason, $groupId);
+            }
+            $pdo->exec('COMMIT');
+            return ['ok' => true];
+        } catch (Throwable $e) {
+            $pdo->exec('ROLLBACK');
+            return ['ok' => false, 'error' => 'Konnte nicht gespeichert werden.'];
+        }
+    }
+
+    /** @param int[] $ids */
+    public static function deleteBlockedGroup(PDO $pdo, array $ids): void
+    {
+        if (!$ids) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare("DELETE FROM blocked_dates WHERE id IN ($placeholders)");
+        $stmt->execute($ids);
     }
 
     /**
@@ -515,7 +657,16 @@ final class Booking
     // Admin: manuelle Sperr-Slots (z.B. private Termine)
     // ------------------------------------------------------------------
 
-    public static function addManualBlock(PDO $pdo, string $date, string $start, string $end, string $reason): array
+    /** Sentinel-Uhrzeiten für "keine Uhrzeit angegeben" = ganzer Tag blockiert. */
+    public const FULLDAY_START = '00:00';
+    public const FULLDAY_END = '24:00';
+
+    public static function isFullDayBlock(string $start, string $end): bool
+    {
+        return $start === self::FULLDAY_START && $end === self::FULLDAY_END;
+    }
+
+    public static function addManualBlock(PDO $pdo, string $date, string $start, string $end, string $reason, ?string $groupId = null): array
     {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !preg_match('/^\d{2}:\d{2}$/', $start) || !preg_match('/^\d{2}:\d{2}$/', $end)) {
             return ['ok' => false, 'error' => 'Ungültiges Datum/Uhrzeit.'];
@@ -540,8 +691,8 @@ final class Booking
             }
             $token = bin2hex(random_bytes(24));
             $ins = $pdo->prepare('
-                INSERT INTO bookings (date, start_time, end_time, type, name, email, phone, message, status, cancel_token, created_at)
-                VALUES (:date, :start, :end, \'block\', :reason, NULL, NULL, NULL, \'confirmed\', :token, :created_at)
+                INSERT INTO bookings (date, start_time, end_time, type, name, email, phone, message, status, cancel_token, created_at, group_id)
+                VALUES (:date, :start, :end, \'block\', :reason, NULL, NULL, NULL, \'confirmed\', :token, :created_at, :group_id)
             ');
             $ins->execute([
                 'date' => $date,
@@ -550,6 +701,7 @@ final class Booking
                 'reason' => $reason !== '' ? $reason : 'Blockiert',
                 'token' => $token,
                 'created_at' => self::now()->format('Y-m-d H:i:s'),
+                'group_id' => $groupId,
             ]);
             $pdo->exec('COMMIT');
             return ['ok' => true];
@@ -560,9 +712,10 @@ final class Booking
     }
 
     /**
-     * Blockiert dieselbe Uhrzeit an jedem Tag zwischen $dateFrom und $dateTo (inklusive) –
-     * z. B. jeden Vormittag einer Fortbildungswoche. Tage, die sich mit einem bestehenden
-     * Termin überschneiden, werden übersprungen und in \'failed\' gemeldet statt den ganzen
+     * Blockiert dieselbe Uhrzeit (oder den ganzen Tag, siehe FULLDAY_START/END) an jedem
+     * Tag zwischen $dateFrom und $dateTo (inklusive), als gemeinsame Gruppe – z. B. jeden
+     * Vormittag einer Fortbildungswoche. Tage, die sich mit einem bestehenden Termin
+     * überschneiden, werden übersprungen und in \'failed\' gemeldet statt den ganzen
      * Zeitraum abzubrechen.
      *
      * @return array{ok:bool, added:int, failed:array<int,array{date:string,error:string}>}
@@ -573,10 +726,11 @@ final class Booking
         if (!$dates) {
             return ['ok' => false, 'added' => 0, 'failed' => [['date' => $dateFrom, 'error' => 'Ungültiger Zeitraum.']]];
         }
+        $groupId = self::newGroupId();
         $added = 0;
         $failed = [];
         foreach ($dates as $d) {
-            $result = self::addManualBlock($pdo, $d, $start, $end, $reason);
+            $result = self::addManualBlock($pdo, $d, $start, $end, $reason, $groupId);
             if ($result['ok']) {
                 $added++;
             } else {
@@ -584,6 +738,46 @@ final class Booking
             }
         }
         return ['ok' => $added > 0, 'added' => $added, 'failed' => $failed];
+    }
+
+    /**
+     * Fasst Zeitraum-Blocker (Buchungen vom Typ \'block\') aus listUpcoming() zu
+     * Gruppen zusammen (ein Eintrag pro group_id, als Von–Bis dargestellt).
+     *
+     * @param array[] $blockRows nur Zeilen mit type === \'block\'
+     * @return array<int,array{ids:int[],date_from:string,date_to:string,start_time:string,end_time:string,reason:string}>
+     */
+    public static function groupBlockRows(array $blockRows): array
+    {
+        $groups = [];
+        $index = [];
+        foreach ($blockRows as $row) {
+            $gid = $row['group_id'] ?? ('single-' . $row['id']);
+            if (!isset($index[$gid])) {
+                $index[$gid] = count($groups);
+                $groups[] = [
+                    'ids' => [],
+                    'date_from' => $row['date'],
+                    'date_to' => $row['date'],
+                    'start_time' => $row['start_time'],
+                    'end_time' => $row['end_time'],
+                    'reason' => $row['name'],
+                ];
+            }
+            $i = $index[$gid];
+            $groups[$i]['ids'][] = (int) $row['id'];
+            $groups[$i]['date_from'] = min($groups[$i]['date_from'], $row['date']);
+            $groups[$i]['date_to'] = max($groups[$i]['date_to'], $row['date']);
+        }
+        return $groups;
+    }
+
+    /** @param int[] $ids */
+    public static function cancelGroup(PDO $pdo, array $ids, string $cancelledBy = 'admin'): void
+    {
+        foreach ($ids as $id) {
+            self::cancelById($pdo, $id, $cancelledBy);
+        }
     }
 
     public const WEEKDAYS = [0 => 'Sonntag', 1 => 'Montag', 2 => 'Dienstag', 3 => 'Mittwoch', 4 => 'Donnerstag', 5 => 'Freitag', 6 => 'Samstag'];
