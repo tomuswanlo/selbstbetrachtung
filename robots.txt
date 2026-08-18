@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /contact.php
+Disallow: /whatsapp.php
+Disallow: /lib/
+
+Sitemap: https://selbstbetrachtung-online.de/sitemap.xml
