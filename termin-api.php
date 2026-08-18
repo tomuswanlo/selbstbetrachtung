@@ -228,6 +228,9 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             "{$dateFormatted}, {$startTime}–{$booking['end_time']} Uhr\n\n" .
             "Sollten Sie den Termin nicht wahrnehmen können, sagen Sie ihn bitte hier ab:\n" .
             "{$cancelUrl}\n\n" .
+            "Sollte kurzfristig doch etwas dazwischenkommen oder Sie möchten sonst etwas absprechen, " .
+            "erreichen Sie mich auch direkt über das Kontaktformular (" . baseUrl() . "/#kontakt) " .
+            "oder telefonisch unter +49 151 4135 7281.\n\n" .
             "Diese Bestätigung wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
             "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
             "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n";

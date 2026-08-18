@@ -139,7 +139,7 @@ declare(strict_types=1);
 
     <div class="slots-card" id="slotsSection" hidden>
       <h2>Verfügbare Uhrzeiten am <span id="selectedDateLabel"></span></h2>
-      <p class="slots-hint">Sollte kein Termin in Ihrem gewünschten Zeitfenster frei sein, kontaktieren Sie mich gerne direkt über das <a href="/#kontakt">Kontaktformular</a>.</p>
+      <p class="slots-hint">Sollte kein Termin in Ihrem gewünschten Zeitfenster frei sein, kontaktieren Sie mich gerne direkt über das <a href="/#kontakt">Kontaktformular</a> oder telefonisch unter <a id="phoneHint" href="#"></a>.</p>
       <div class="slots-grid" id="slotsGrid"></div>
       <p class="slots-empty" id="slotsEmpty" hidden>An diesem Tag sind leider keine Termine mehr frei.</p>
     </div>
@@ -216,6 +216,18 @@ declare(strict_types=1);
     var submitBtn = document.getElementById('submitBtn');
 
     document.getElementById('tsField').value = String(Date.now());
+
+    // Telefonnummer erst im Browser aus Zeichencodes zusammensetzen (wie auf der übrigen
+    // Website), damit sie nicht im HTML-Quelltext für einfache Scraper auslesbar ist.
+    (function(){
+      var codes = [43,52,57,32,49,53,49,32,52,49,51,53,32,55,50,56,49]; // "+49 151 4135 7281"
+      var text = codes.map(function(c){ return String.fromCharCode(c); }).join('');
+      var el = document.getElementById('phoneHint');
+      if (el) {
+        el.textContent = text;
+        el.href = 'tel:' + text.replace(/\s+/g, '');
+      }
+    })();
 
     var MONTH_NAMES = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 
