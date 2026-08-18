@@ -19,7 +19,7 @@ final class Booking
     public const MIN_LEAD_HOURS = 24;
 
     /** Wie weit im Voraus gebucht werden kann (Tage) */
-    public const MAX_ADVANCE_DAYS = 60;
+    public const MAX_ADVANCE_DAYS = 90;
 
     /** Raster für Slot-Kandidaten (Minuten) */
     public const SLOT_GRID_MINUTES = 15;

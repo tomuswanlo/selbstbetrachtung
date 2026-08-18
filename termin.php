@@ -187,7 +187,7 @@ declare(strict_types=1);
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script>
   (function(){
-    var MAX_ADVANCE_DAYS = 60;
+    var MAX_ADVANCE_DAYS = 90;
     var WEEKDAY_LABELS = ['Mo','Di','Mi','Do','Fr','Sa','So'];
 
     var today = new Date();
