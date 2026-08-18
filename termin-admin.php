@@ -152,6 +152,20 @@ $blockedDates = $isLoggedIn ? Booking::listBlockedDates($pdo) : [];
 $upcoming = $isLoggedIn ? Booking::listUpcoming($pdo) : [];
 $csrf = $isLoggedIn ? csrfToken() : '';
 
+// "Kommende Termine": echte Buchungen/Zeitraum-Blocker + ganztägige Sperrtage in einer
+// gemeinsamen, chronologisch sortierten Übersicht zusammenführen.
+$today = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d');
+$agenda = [];
+foreach ($upcoming as $u) {
+    $agenda[] = ['kind' => 'booking', 'date' => $u['date'], 'sortKey' => $u['start_time'], 'data' => $u];
+}
+foreach ($blockedDates as $b) {
+    if ($b['date'] >= $today) {
+        $agenda[] = ['kind' => 'blocked_date', 'date' => $b['date'], 'sortKey' => '00:00', 'data' => $b];
+    }
+}
+usort($agenda, static fn(array $a, array $b): int => [$a['date'], $a['sortKey']] <=> [$b['date'], $b['sortKey']]);
+
 // Bearbeiten-Modus: welche Zeile (falls vorhanden) wird gerade im Formular vorausgefüllt?
 $editRule = null;
 if (isset($_GET['edit_rule'])) {
@@ -334,10 +348,20 @@ if (isset($_GET['edit_blocked'])) {
 
   <section class="card">
     <h2>Kommende Termine</h2>
+    <p class="muted">Zeigt echte Buchungen, manuell blockierte Zeiträume und ganztägige Sperrtage gemeinsam, chronologisch sortiert.</p>
     <table>
-      <thead><tr><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in</th><th></th></tr></thead>
+      <thead><tr><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in / Grund</th><th></th></tr></thead>
       <tbody>
-      <?php foreach ($upcoming as $u): ?>
+      <?php foreach ($agenda as $entry): ?>
+        <?php if ($entry['kind'] === 'blocked_date'): $b = $entry['data']; ?>
+        <tr>
+          <td><?= htmlspecialchars((new DateTimeImmutable($b['date']))->format('d.m.Y')) ?></td>
+          <td>Ganztägig</td>
+          <td><span class="badge">Gesperrt</span></td>
+          <td><?= htmlspecialchars((string) $b['reason']) ?: '<span class="muted">–</span>' ?></td>
+          <td><a class="btn" style="text-decoration:none" href="?edit_blocked=<?= (int) $b['id'] ?>#sperrtage">Bearbeiten</a></td>
+        </tr>
+        <?php else: $u = $entry['data']; ?>
         <tr>
           <td><?= htmlspecialchars((new DateTimeImmutable($u['date']))->format('d.m.Y')) ?></td>
           <td><?= htmlspecialchars($u['start_time']) ?>–<?= htmlspecialchars($u['end_time']) ?></td>
@@ -362,8 +386,9 @@ if (isset($_GET['edit_blocked'])) {
             </form>
           </td>
         </tr>
+        <?php endif; ?>
       <?php endforeach; ?>
-      <?php if (!$upcoming): ?><tr><td colspan="5" class="muted">Keine anstehenden Termine.</td></tr><?php endif; ?>
+      <?php if (!$agenda): ?><tr><td colspan="5" class="muted">Keine anstehenden Termine.</td></tr><?php endif; ?>
       </tbody>
     </table>
     <p class="muted">Hinweis: Beim Stornieren durch Sie wird der/die Klient*in <strong>nicht</strong> automatisch per E-Mail informiert – bitte ggf. selbst Bescheid geben.</p>
