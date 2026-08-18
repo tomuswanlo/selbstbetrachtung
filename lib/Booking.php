@@ -109,6 +109,28 @@ final class Booking
         // group_id (aus der Zeit vor dieser Funktion) rückwirkend zu Gruppen zusammenfassen.
         self::backfillBlockedDateGroups($pdo);
         self::backfillBlockGroups($pdo);
+
+        // Datenschutz: vergangene Klienten-Termine werden nach Ablauf der
+        // Aufbewahrungsfrist automatisch gelöscht (siehe Datenschutzerklärung).
+        // Läuft bei jedem Verbindungsaufbau mit; bei diesem Trafficvolumen
+        // ausreichend, ohne einen separaten Cron-Job zu benötigen.
+        self::purgeOldBookings($pdo);
+    }
+
+    /** Aufbewahrungsfrist für Klienten-Termindaten gemäß Datenschutzerklärung (Monate). */
+    public const BOOKING_RETENTION_MONTHS = 3;
+
+    /**
+     * Löscht echte Klienten-Termine (Erstgespräch/Folgetermin), deren Termindatum
+     * länger als BOOKING_RETENTION_MONTHS zurückliegt. Manuelle Sperr-Slots (type
+     * \'block\') und Sperrtage enthalten keine Klienten-Daten und werden bewusst
+     * nicht angerührt.
+     */
+    private static function purgeOldBookings(PDO $pdo): void
+    {
+        $cutoff = self::now()->modify('-' . self::BOOKING_RETENTION_MONTHS . ' months')->format('Y-m-d');
+        $stmt = $pdo->prepare("DELETE FROM bookings WHERE date < :cutoff AND type IN ('erstgespraech', 'folgetermin')");
+        $stmt->execute(['cutoff' => $cutoff]);
     }
 
     private static function ensureColumn(PDO $pdo, string $table, string $column, string $type): void
