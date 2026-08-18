@@ -108,7 +108,7 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         redirectBack();
     }
 
-    if ($do === 'add_manual_block') {
+    if ($do === 'add_manual_block' || $do === 'update_manual_block_group') {
         $dateFrom = trim((string) ($_POST['date_from'] ?? ''));
         $dateTo = trim((string) ($_POST['date_to'] ?? ''));
         $start = trim((string) ($_POST['start_time'] ?? ''));
@@ -122,7 +122,12 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
             $start = Booking::FULLDAY_START;
             $end = Booking::FULLDAY_END;
         }
-        $result = Booking::addManualBlockRange($pdo, $dateFrom, $dateTo, $start, $end, $reason);
+        if ($do === 'update_manual_block_group') {
+            $ids = array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))));
+            $result = Booking::updateManualBlockGroup($pdo, $ids, $dateFrom, $dateTo, $start, $end, $reason);
+        } else {
+            $result = Booking::addManualBlockRange($pdo, $dateFrom, $dateTo, $start, $end, $reason);
+        }
         if ($result['added'] === 0) {
             $_SESSION['flash_error'] = 'Konnte nicht gespeichert werden (Von: "' . $dateFrom . '", Bis: "' . $dateTo . '"): ' . ($result['failed'][0]['error'] ?? 'Ungültiger Zeitraum.');
         } elseif ($result['failed']) {
@@ -196,6 +201,16 @@ if (isset($_GET['edit_blocked'])) {
         }
     }
 }
+$editBlockGroup = null;
+if (isset($_GET['edit_block'])) {
+    $editBlockId = (int) $_GET['edit_block'];
+    foreach ($blockGroups as $g) {
+        if (in_array($editBlockId, $g['ids'], true)) {
+            $editBlockGroup = $g;
+            break;
+        }
+    }
+}
 ?><!DOCTYPE html>
 <html lang="de">
 <head>
@@ -261,6 +276,74 @@ if (isset($_GET['edit_blocked'])) {
 
   <h1>Terminverwaltung</h1>
   <?php if ($flashError): ?><p class="error"><?= htmlspecialchars($flashError) ?></p><?php endif; ?>
+
+  <section class="card">
+    <h2>Kommende Termine</h2>
+    <p class="muted">Zeigt echte Buchungen, manuell blockierte Zeiträume und ganztägige Sperrtage gemeinsam, chronologisch sortiert.</p>
+    <table>
+      <thead><tr><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in / Grund</th><th></th></tr></thead>
+      <tbody>
+      <?php foreach ($agenda as $entry):
+        $dateFromFmt = (new DateTimeImmutable($entry['data']['date_from'] ?? $entry['data']['date']))->format('d.m.Y');
+      ?>
+        <?php if ($entry['kind'] === 'blocked_group'): $g = $entry['data']; ?>
+        <tr>
+          <td><?= htmlspecialchars($dateFromFmt) ?><?php if ($g['date_to'] !== $g['date_from']): ?> – <?= htmlspecialchars((new DateTimeImmutable($g['date_to']))->format('d.m.Y')) ?><?php endif; ?></td>
+          <td>Ganztägig</td>
+          <td><span class="badge">Gesperrt</span></td>
+          <td><?= htmlspecialchars((string) $g['reason']) ?: '<span class="muted">–</span>' ?></td>
+          <td style="display:flex; gap:.4rem;">
+            <a class="btn" style="text-decoration:none" href="?edit_blocked=<?= (int) $g['ids'][0] ?>#sperrtage">Bearbeiten</a>
+            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich löschen?');">
+              <input type="hidden" name="do" value="delete_blocked_group">
+              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+              <input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $g['ids'])) ?>">
+              <button type="submit" class="btn btn--danger">Löschen</button>
+            </form>
+          </td>
+        </tr>
+        <?php elseif ($entry['kind'] === 'block_group'): $g = $entry['data']; ?>
+        <tr>
+          <td><?= htmlspecialchars($dateFromFmt) ?><?php if ($g['date_to'] !== $g['date_from']): ?> – <?= htmlspecialchars((new DateTimeImmutable($g['date_to']))->format('d.m.Y')) ?><?php endif; ?></td>
+          <td><?= Booking::isFullDayBlock($g['start_time'], $g['end_time']) ? 'Ganztägig' : htmlspecialchars($g['start_time']) . '–' . htmlspecialchars($g['end_time']) ?></td>
+          <td><span class="badge">Blockiert</span></td>
+          <td><?= htmlspecialchars((string) $g['reason']) ?></td>
+          <td style="display:flex; gap:.4rem;">
+            <a class="btn" style="text-decoration:none" href="?edit_block=<?= (int) $g['ids'][0] ?>#zeitraum">Bearbeiten</a>
+            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich stornieren?');">
+              <input type="hidden" name="do" value="cancel_block_group">
+              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+              <input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $g['ids'])) ?>">
+              <button type="submit" class="btn btn--danger">Stornieren</button>
+            </form>
+          </td>
+        </tr>
+        <?php else: $u = $entry['data']; ?>
+        <tr>
+          <td><?= htmlspecialchars((new DateTimeImmutable($u['date']))->format('d.m.Y')) ?></td>
+          <td><?= htmlspecialchars($u['start_time']) ?>–<?= htmlspecialchars($u['end_time']) ?></td>
+          <td><?= htmlspecialchars(Booking::TYPES[$u['type']]['label'] ?? $u['type']) ?></td>
+          <td>
+            <?= htmlspecialchars($u['name']) ?>
+            <?php if ($u['email']): ?><br><span class="muted"><?= htmlspecialchars($u['email']) ?><?php if ($u['phone']): ?> · <?= htmlspecialchars($u['phone']) ?><?php endif; ?></span><?php endif; ?>
+            <?php if ($u['message']): ?><br><span class="muted">„<?= htmlspecialchars($u['message']) ?>“</span><?php endif; ?>
+          </td>
+          <td>
+            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Termin wirklich stornieren? Der/die Klient*in wird nicht automatisch benachrichtigt.');">
+              <input type="hidden" name="do" value="cancel_booking">
+              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+              <input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
+              <button type="submit" class="btn btn--danger">Stornieren</button>
+            </form>
+          </td>
+        </tr>
+        <?php endif; ?>
+      <?php endforeach; ?>
+      <?php if (!$agenda): ?><tr><td colspan="5" class="muted">Keine anstehenden Termine.</td></tr><?php endif; ?>
+      </tbody>
+    </table>
+    <p class="muted">Hinweis: Beim Stornieren durch Sie wird der/die Klient*in <strong>nicht</strong> automatisch per E-Mail informiert – bitte ggf. selbst Bescheid geben.</p>
+  </section>
 
   <section class="card" id="wochenzeiten">
     <h2>Wöchentliche Verfügbarkeit</h2>
@@ -341,78 +424,24 @@ if (isset($_GET['edit_blocked'])) {
     </form>
   </section>
 
-  <section class="card">
+  <section class="card" id="zeitraum">
     <h2>Zeitraum blockieren</h2>
     <p class="muted">Für private Termine, die nicht über die Website gebucht wurden. Mit „Bis“ lässt sich derselbe Zeitraum über mehrere Tage blockieren (z. B. jeden Vormittag einer Fortbildungswoche). Uhrzeit leer lassen = ganzer Tag.</p>
+    <?php
+      $editBlockIsFullDay = $editBlockGroup && Booking::isFullDayBlock($editBlockGroup['start_time'], $editBlockGroup['end_time']);
+    ?>
     <form class="inline" method="post">
-      <input type="hidden" name="do" value="add_manual_block">
+      <input type="hidden" name="do" value="<?= $editBlockGroup ? 'update_manual_block_group' : 'add_manual_block' ?>">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <label>Von <input type="date" name="date_from" required></label>
-      <label>Bis (optional, für mehrere Tage) <input type="date" name="date_to"></label>
-      <label>Uhrzeit von (optional) <input type="time" name="start_time"></label>
-      <label>Uhrzeit bis (optional) <input type="time" name="end_time"></label>
-      <label>Grund <input type="text" name="reason" placeholder="z. B. Fortbildung"></label>
-      <button type="submit" class="btn">Blockieren</button>
+      <?php if ($editBlockGroup): ?><input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $editBlockGroup['ids'])) ?>"><?php endif; ?>
+      <label>Von <input type="date" name="date_from" value="<?= $editBlockGroup ? htmlspecialchars($editBlockGroup['date_from']) : '' ?>" required></label>
+      <label>Bis (optional, für mehrere Tage) <input type="date" name="date_to" value="<?= $editBlockGroup ? htmlspecialchars($editBlockGroup['date_to']) : '' ?>"></label>
+      <label>Uhrzeit von (optional) <input type="time" name="start_time" value="<?= ($editBlockGroup && !$editBlockIsFullDay) ? htmlspecialchars($editBlockGroup['start_time']) : '' ?>"></label>
+      <label>Uhrzeit bis (optional) <input type="time" name="end_time" value="<?= ($editBlockGroup && !$editBlockIsFullDay) ? htmlspecialchars($editBlockGroup['end_time']) : '' ?>"></label>
+      <label>Grund <input type="text" name="reason" placeholder="z. B. Fortbildung" value="<?= $editBlockGroup ? htmlspecialchars((string) $editBlockGroup['reason']) : '' ?>"></label>
+      <button type="submit" class="btn"><?= $editBlockGroup ? 'Speichern' : 'Blockieren' ?></button>
+      <?php if ($editBlockGroup): ?><a href="termin-admin.php#zeitraum" style="color:var(--ink-mute)">Abbrechen</a><?php endif; ?>
     </form>
-  </section>
-
-  <section class="card">
-    <h2>Kommende Termine</h2>
-    <p class="muted">Zeigt echte Buchungen, manuell blockierte Zeiträume und ganztägige Sperrtage gemeinsam, chronologisch sortiert.</p>
-    <table>
-      <thead><tr><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in / Grund</th><th></th></tr></thead>
-      <tbody>
-      <?php foreach ($agenda as $entry):
-        $dateFromFmt = (new DateTimeImmutable($entry['data']['date_from'] ?? $entry['data']['date']))->format('d.m.Y');
-      ?>
-        <?php if ($entry['kind'] === 'blocked_group'): $g = $entry['data']; ?>
-        <tr>
-          <td><?= htmlspecialchars($dateFromFmt) ?><?php if ($g['date_to'] !== $g['date_from']): ?> – <?= htmlspecialchars((new DateTimeImmutable($g['date_to']))->format('d.m.Y')) ?><?php endif; ?></td>
-          <td>Ganztägig</td>
-          <td><span class="badge">Gesperrt</span></td>
-          <td><?= htmlspecialchars((string) $g['reason']) ?: '<span class="muted">–</span>' ?></td>
-          <td><a class="btn" style="text-decoration:none" href="?edit_blocked=<?= (int) $g['ids'][0] ?>#sperrtage">Bearbeiten</a></td>
-        </tr>
-        <?php elseif ($entry['kind'] === 'block_group'): $g = $entry['data']; ?>
-        <tr>
-          <td><?= htmlspecialchars($dateFromFmt) ?><?php if ($g['date_to'] !== $g['date_from']): ?> – <?= htmlspecialchars((new DateTimeImmutable($g['date_to']))->format('d.m.Y')) ?><?php endif; ?></td>
-          <td><?= Booking::isFullDayBlock($g['start_time'], $g['end_time']) ? 'Ganztägig' : htmlspecialchars($g['start_time']) . '–' . htmlspecialchars($g['end_time']) ?></td>
-          <td><span class="badge">Blockiert</span></td>
-          <td><?= htmlspecialchars((string) $g['reason']) ?></td>
-          <td>
-            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Zeitraum wirklich stornieren?');">
-              <input type="hidden" name="do" value="cancel_block_group">
-              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-              <input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $g['ids'])) ?>">
-              <button type="submit" class="btn btn--danger">Stornieren</button>
-            </form>
-          </td>
-        </tr>
-        <?php else: $u = $entry['data']; ?>
-        <tr>
-          <td><?= htmlspecialchars((new DateTimeImmutable($u['date']))->format('d.m.Y')) ?></td>
-          <td><?= htmlspecialchars($u['start_time']) ?>–<?= htmlspecialchars($u['end_time']) ?></td>
-          <td><?= htmlspecialchars(Booking::TYPES[$u['type']]['label'] ?? $u['type']) ?></td>
-          <td>
-            <?= htmlspecialchars($u['name']) ?>
-            <?php if ($u['email']): ?><br><span class="muted"><?= htmlspecialchars($u['email']) ?><?php if ($u['phone']): ?> · <?= htmlspecialchars($u['phone']) ?><?php endif; ?></span><?php endif; ?>
-            <?php if ($u['message']): ?><br><span class="muted">„<?= htmlspecialchars($u['message']) ?>“</span><?php endif; ?>
-          </td>
-          <td>
-            <form method="post" style="margin:0" onsubmit="return confirm('Diesen Termin wirklich stornieren? Der/die Klient*in wird nicht automatisch benachrichtigt.');">
-              <input type="hidden" name="do" value="cancel_booking">
-              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-              <input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
-              <button type="submit" class="btn btn--danger">Stornieren</button>
-            </form>
-          </td>
-        </tr>
-        <?php endif; ?>
-      <?php endforeach; ?>
-      <?php if (!$agenda): ?><tr><td colspan="5" class="muted">Keine anstehenden Termine.</td></tr><?php endif; ?>
-      </tbody>
-    </table>
-    <p class="muted">Hinweis: Beim Stornieren durch Sie wird der/die Klient*in <strong>nicht</strong> automatisch per E-Mail informiert – bitte ggf. selbst Bescheid geben.</p>
   </section>
 
 <?php endif; ?>

@@ -741,6 +741,27 @@ final class Booking
     }
 
     /**
+     * Storniert die alten Zeilen der übergebenen IDs und legt den Zeitraum neu an.
+     * Validiert Datumsbereich und Uhrzeit *vor* dem Stornieren, damit bei ungültiger
+     * Eingabe der ursprüngliche Block nicht verloren geht.
+     *
+     * @param int[] $ids
+     * @return array{ok:bool, added:int, failed:array<int,array{date:string,error:string}>}
+     */
+    public static function updateManualBlockGroup(PDO $pdo, array $ids, string $dateFrom, string $dateTo, string $start, string $end, string $reason): array
+    {
+        $dates = self::dateRange($dateFrom, $dateTo);
+        if (!$dates) {
+            return ['ok' => false, 'added' => 0, 'failed' => [['date' => $dateFrom, 'error' => 'Ungültiger Zeitraum.']]];
+        }
+        if (!preg_match('/^\d{2}:\d{2}$/', $start) || !preg_match('/^\d{2}:\d{2}$/', $end) || $end <= $start) {
+            return ['ok' => false, 'added' => 0, 'failed' => [['date' => $dateFrom, 'error' => 'Ungültige Uhrzeit.']]];
+        }
+        self::cancelGroup($pdo, $ids, 'admin');
+        return self::addManualBlockRange($pdo, $dateFrom, $dateTo, $start, $end, $reason);
+    }
+
+    /**
      * Fasst Zeitraum-Blocker (Buchungen vom Typ \'block\') aus listUpcoming() zu
      * Gruppen zusammen (ein Eintrag pro group_id, als Von–Bis dargestellt).
      *
