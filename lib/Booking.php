@@ -492,8 +492,12 @@ final class Booking
         $tz = new DateTimeZone('Europe/Berlin');
         $start = DateTimeImmutable::createFromFormat('!Y-m-d', $from, $tz);
         $end = DateTimeImmutable::createFromFormat('!Y-m-d', $to, $tz);
-        if (!$start || !$end || $end < $start) {
+        if (!$start || !$end) {
             return [];
+        }
+        if ($end < $start) {
+            // "Von" und "Bis" wurden vertauscht eingegeben – statt eines Fehlers einfach tauschen.
+            [$start, $end] = [$end, $start];
         }
         if ($start->diff($end)->days > 366) {
             return [];

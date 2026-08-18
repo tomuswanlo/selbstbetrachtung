@@ -92,7 +92,7 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         }
         $result = Booking::addBlockedDateRange($pdo, $dateFrom, $dateTo, $reason);
         if (!$result['ok']) {
-            $_SESSION['flash_error'] = 'Ungültiger Zeitraum.';
+            $_SESSION['flash_error'] = 'Ungültiger Zeitraum (Von: "' . $dateFrom . '", Bis: "' . $dateTo . '").';
         }
         redirectBack();
     }
@@ -127,7 +127,7 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         }
         $result = Booking::addManualBlockRange($pdo, $dateFrom, $dateTo, $start, $end, $reason);
         if ($result['added'] === 0) {
-            $_SESSION['flash_error'] = 'Konnte nicht gespeichert werden: ' . ($result['failed'][0]['error'] ?? 'Ungültiger Zeitraum.');
+            $_SESSION['flash_error'] = 'Konnte nicht gespeichert werden (Von: "' . $dateFrom . '", Bis: "' . $dateTo . '"): ' . ($result['failed'][0]['error'] ?? 'Ungültiger Zeitraum.');
         } elseif ($result['failed']) {
             $days = implode(', ', array_map(
                 static fn(array $f): string => (new DateTimeImmutable($f['date']))->format('d.m.'),
