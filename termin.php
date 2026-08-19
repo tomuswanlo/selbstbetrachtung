@@ -7,7 +7,6 @@ declare(strict_types=1);
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Termin online buchen – Selbstbetrachtung</title>
 <meta name="description" content="Vereinbaren Sie online einen Termin für ein Erstgespräch oder einen Folgetermin bei Gabriele Küppers – Selbstbetrachtung, Psychologische Beratung/Coaching, Mönchengladbach.">
-<meta name="robots" content="noindex, follow">
 <style>
   :root{
     --cream:#F4EFE7; --cream-light:#FBF8F2; --cream-dark:#EDE5D8;
