@@ -3,5 +3,8 @@ Allow: /
 Disallow: /contact.php
 Disallow: /whatsapp.php
 Disallow: /lib/
+Disallow: /termin-admin.php
+Disallow: /termin-api.php
+Disallow: /termin-absagen.php
 
 Sitemap: https://selbstbetrachtung-online.de/sitemap.xml
