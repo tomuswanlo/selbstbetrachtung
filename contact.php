@@ -162,7 +162,7 @@ try {
     $confirm->Body =
         "Liebe/r {$name},\n\n" .
         "vielen Dank für Ihre Nachricht über selbstbetrachtung-online.de. Sie ist bei mir angekommen " .
-        "und ich melde mich in der Regel innerhalb von 24–48 Stunden bei Ihnen zurück.\n\n" .
+        "und ich melde mich in der Regel innerhalb von 24 Stunden bei Ihnen zurück.\n\n" .
         "Diese Bestätigung wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
         "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
         "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n\n" .
