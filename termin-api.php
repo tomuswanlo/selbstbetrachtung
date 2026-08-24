@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 date_default_timezone_set('Europe/Berlin');
 header('Content-Type: application/json; charset=utf-8');
+// Nicht in robots.txt sperren: termin.php laedt den Kalender per Fetch von hier nach,
+// ein Disallow wuerde auch das fuer Googlebot beim Rendern von termin.php blockieren
+// (fuehrte zu Soft-404 auf termin.php). Stattdessen hier direkt "nicht indexieren".
+header('X-Robots-Tag: noindex, nofollow');
 
 require __DIR__ . '/lib/Booking.php';
 
