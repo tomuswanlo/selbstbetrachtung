@@ -14,9 +14,15 @@
   </url>
   <url>
     <loc>https://selbstbetrachtung-online.de/blog.php</loc>
-    <lastmod>2026-08-19</lastmod>
+    <lastmod>2026-09-04</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://selbstbetrachtung-online.de/blog.php?post=gesunde-gewohnheiten-warum-wissen-nicht-reicht</loc>
+    <lastmod>2026-09-04</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://selbstbetrachtung-online.de/blog.php?post=wenn-der-kopf-nicht-abschaltet</loc>

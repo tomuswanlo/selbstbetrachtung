@@ -25,6 +25,30 @@ final class BlogPosts
     {
         return [
             [
+                'slug' => 'gesunde-gewohnheiten-warum-wissen-nicht-reicht',
+                'title' => '85,6 statt 81,4 Jahre: Warum Wissen allein nicht reicht',
+                'date' => '2026-09-04',
+                'excerpt' => 'Eine Studie zeigt: Wir wünschen uns 85,6 Lebensjahre, erreichen aber nur 81,4. Ein Gedanke dazu, den ich vor Kurzem geteilt habe – hier etwas ausführlicher.',
+                'image' => null,
+                'image_alt' => null,
+                'source_label' => null,
+                'source_url' => null,
+                'body' => <<<'HTML'
+<p>Wir wollen im Schnitt 85,6 Jahre alt werden. Erreicht wird davon im Schnitt nur ein Alter von 81,4 Jahren – eine Lücke von über vier Jahren. Das zeigt eine aktuelle Studie des Nuremberg Institute for Market Decisions (NIM) zu „Longevity zwischen Anspruch und Alltag". Die eigentlich interessante Zahl steckt aber nicht im Altersunterschied, sondern in der Erklärung dahinter – ein Gedanke, den ich dazu vor Kurzem kurz geteilt hatte, möchte ich hier etwas vertiefen.</p>
+
+<h2>Die Lücke zwischen Wunsch und Wirklichkeit</h2>
+<p>53 % der Befragten leben laut der Studie bewusst im Moment statt langfristig gesundheitsbewusst. Nur 22 % beschreiben sich selbst als wirklich diszipliniert. Dabei sind viele einzelne gesunde Gewohnheiten – ausreichend Schlaf, Bewegung, soziale Kontakte – längst vorhanden. Was fehlt, ist offenbar nicht das Wissen. Was fehlt, ist etwas anderes.</p>
+
+<h2>Warum Wissen allein nicht reicht</h2>
+<p>Fast jeder weiß, was guttut: mehr Bewegung, besserer Schlaf, weniger Stress, echte soziale Kontakte. Trotzdem klafft zwischen Wunsch und gelebtem Alltag eine deutliche Lücke. Es scheitert selten am fehlenden Wissen – ein weiterer Ernährungsplan, eine weitere App, ein weiterer Ratgeber ändert daran meist wenig. Es scheitert an der inneren Haltung: an Gewohnheiten, die sich über Jahre eingeschliffen haben, und vor allem an der Frage, warum man überhaupt etwas verändern möchte. Ohne einen echten, persönlichen Grund bleibt jede Veränderung ein Vorsatz – und Vorsätze sind bekanntlich kurzlebig.</p>
+
+<h2>Es geht um Motivation, nicht um einen weiteren Plan</h2>
+<p>Ein Plan sagt, was zu tun ist. Er beantwortet aber selten, warum es bisher nicht gelungen ist, danach zu leben – und was im Alltag, im Selbstbild oder in bisherigen Erfahrungen eigentlich im Weg steht. Diese Fragen lassen sich nicht mit noch mehr Fachwissen lösen, sondern nur im echten Gespräch mit sich selbst – oder mit jemandem, der dabei unterstützt, ehrlich hinzuschauen.</p>
+
+<p>Genau daran setzt psychologische Beratung an: nicht bei der Frage, was gesund ist, sondern bei der Frage, was Sie persönlich davon abhält, danach zu handeln. Das kann die eigene Motivation sein, ein festgefahrenes Selbstbild, alte Gewohnheiten oder auch die Angst vor Veränderung selbst. Wenn Sie das Gefühl haben, genau an diesem Punkt festzustecken: Ein <a href="/#kontakt">kostenloses, unverbindliches Erstgespräch</a> ist ein guter erster Schritt.</p>
+HTML,
+            ],
+            [
                 'slug' => 'wenn-der-kopf-nicht-abschaltet',
                 'title' => 'Wenn der Kopf nicht abschaltet: 3 Fragen, die bei innerer Unruhe helfen',
                 'date' => '2026-08-19',
