@@ -504,6 +504,21 @@ final class Booking
         return $stmt->fetchAll();
     }
 
+    /**
+     * Echte Klienten-Termine (kein \'block\') für die Rechnungsauswahl der Buchhaltung
+     * (siehe buchhaltung-admin.php): die letzten $pastDays Tage plus alle künftigen
+     * bestätigten Termine, neueste zuerst.
+     *
+     * @return array[]
+     */
+    public static function listForInvoicing(PDO $pdo, int $pastDays = 60): array
+    {
+        $from = self::now()->modify('-' . $pastDays . ' days')->format('Y-m-d');
+        $stmt = $pdo->prepare("SELECT * FROM bookings WHERE status = 'confirmed' AND type != 'block' AND date >= :from ORDER BY date DESC, start_time DESC");
+        $stmt->execute(['from' => $from]);
+        return $stmt->fetchAll();
+    }
+
     // ------------------------------------------------------------------
     // Admin: Verfügbarkeitsregeln
     // ------------------------------------------------------------------

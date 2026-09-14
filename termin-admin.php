@@ -254,7 +254,10 @@ if (isset($_GET['edit_block'])) {
 <header>
   <strong>Terminverwaltung</strong>
   <?php if ($isLoggedIn): ?>
-    <form method="post" style="margin:0"><input type="hidden" name="do" value="logout"><button type="submit" class="btn" style="background:none;color:var(--ink-mute)">Abmelden</button></form>
+    <div style="display:flex; gap:1.25rem; align-items:center;">
+      <a href="buchhaltung-admin.php">Buchhaltung</a>
+      <form method="post" style="margin:0"><input type="hidden" name="do" value="logout"><button type="submit" class="btn" style="background:none;color:var(--ink-mute)">Abmelden</button></form>
+    </div>
   <?php else: ?>
     <a href="/">Zur Website</a>
   <?php endif; ?>
@@ -328,7 +331,8 @@ if (isset($_GET['edit_block'])) {
             <?php if ($u['email']): ?><br><span class="muted"><?= htmlspecialchars($u['email']) ?><?php if ($u['phone']): ?> · <?= htmlspecialchars($u['phone']) ?><?php endif; ?></span><?php endif; ?>
             <?php if ($u['message']): ?><br><span class="muted">„<?= htmlspecialchars($u['message']) ?>“</span><?php endif; ?>
           </td>
-          <td>
+          <td style="display:flex; gap:.4rem; flex-wrap:wrap;">
+            <a class="btn" style="text-decoration:none" href="buchhaltung-admin.php?from_booking=<?= (int) $u['id'] ?>#neue-rechnung">Rechnung</a>
             <form method="post" style="margin:0" onsubmit="return confirm('Diesen Termin wirklich stornieren? Der/die Klient*in wird nicht automatisch benachrichtigt.');">
               <input type="hidden" name="do" value="cancel_booking">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">

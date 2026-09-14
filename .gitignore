@@ -2,3 +2,6 @@ smtp_config.php
 termin_admin_config.php
 data/*.sqlite
 data/*.sqlite-*
+data/belege/*
+!data/belege/.htaccess
+!data/belege/index.php
