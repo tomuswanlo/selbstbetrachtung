@@ -36,44 +36,6 @@ function redirectBack(string $hash = ''): void
     exit;
 }
 
-/** @param array{name:string,type:string,tmp_name:string,error:int,size:int} $file */
-function handleReceiptUpload(array $file): array
-{
-    $allowed = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'pdf' => 'application/pdf'];
-    $maxBytes = 8 * 1024 * 1024;
-
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        return ['ok' => false, 'error' => 'Beleg-Upload fehlgeschlagen.'];
-    }
-    if ($file['size'] > $maxBytes) {
-        return ['ok' => false, 'error' => 'Beleg ist zu groß (max. 8 MB).'];
-    }
-    $ext = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
-    if (!isset($allowed[$ext])) {
-        return ['ok' => false, 'error' => 'Nur JPG, PNG oder PDF sind als Beleg erlaubt.'];
-    }
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mime = $finfo ? finfo_file($finfo, $file['tmp_name']) : false;
-    if ($finfo) {
-        finfo_close($finfo);
-    }
-    if ($mime !== $allowed[$ext]) {
-        return ['ok' => false, 'error' => 'Dateiinhalt passt nicht zur Dateiendung.'];
-    }
-
-    $receiptDir = __DIR__ . '/data/belege';
-    if (!is_dir($receiptDir)) {
-        mkdir($receiptDir, 0775, true);
-    }
-    $filename = bin2hex(random_bytes(16)) . '.' . $ext;
-    if (!move_uploaded_file($file['tmp_name'], $receiptDir . '/' . $filename)) {
-        return ['ok' => false, 'error' => 'Beleg konnte nicht gespeichert werden.'];
-    }
-    @chmod($receiptDir . '/' . $filename, 0664);
-
-    return ['ok' => true, 'filename' => $filename, 'original_name' => basename((string) $file['name'])];
-}
-
 function invoiceStatusBadge(string $status): string
 {
     $map = [
@@ -88,9 +50,12 @@ function invoiceStatusBadge(string $status): string
 /** Rendert die eigenständige Druckansicht einer Rechnung (kein Layout der übrigen Seite) und beendet das Skript. */
 function renderInvoicePrint(array $inv, array $settings): void
 {
-    $amount = Buchhaltung::formatEuro((int) $inv['amount_cents']);
     $issued = (new DateTimeImmutable($inv['issued_at']))->format('d.m.Y');
-    $sessionDate = $inv['session_date'] ? (new DateTimeImmutable((string) $inv['session_date']))->format('d.m.Y') : null;
+    $due = $inv['due_date'] ? (new DateTimeImmutable((string) $inv['due_date']))->format('d.m.Y') : null;
+    $today = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d');
+    $overdue = $inv['status'] === 'offen' && $inv['due_date'] && $inv['due_date'] < $today;
+    $verwendungszweck = $inv['invoice_number'] . ' · ' . $inv['client_name'];
+    $hasBank = trim((string) $settings['sender_bank_iban']) !== '';
     ?><!DOCTYPE html>
 <html lang="de">
 <head>
@@ -99,68 +64,149 @@ function renderInvoicePrint(array $inv, array $settings): void
 <meta name="robots" content="noindex, nofollow">
 <title>Rechnung <?= htmlspecialchars($inv['invoice_number']) ?> – Selbstbetrachtung</title>
 <style>
-  :root{ --ink:#2E3439; --ink-mute:#626B71; --gold:#D6A26A; --gold-dark:#B3813F; --danger:#B84A3C; }
-  *{box-sizing:border-box;}
-  body{ margin:0; background:#EDE5D8; color:var(--ink); font-family:"Mulish",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  :root{
+    --cr:#F4EFE7; --cw:#fff; --pt:#2E3439; --pt2:#23282C;
+    --sd:#D6A26A; --sl:#7E909A;
+    --ik:#2E3439; --ik2:#545C62; --ik3:#7C868C;
+    --ln:rgba(46,52,57,.12); --ln2:rgba(46,52,57,.07);
+    --font:"Mulish",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --font-head:"Lora","Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{ font-family:var(--font); background:#e8e2d8; color:var(--ik); }
   .toolbar{ padding:1rem 1.5rem; text-align:right; }
-  .btn{ border:none; border-radius:999px; padding:.55rem 1.3rem; font-weight:700; cursor:pointer; font-family:inherit; background:var(--gold); color:#fff; font-size:.9rem; }
-  .btn:hover{ background:var(--gold-dark); }
-  .sheet{ max-width:700px; margin:0 auto 3rem; background:#fff; padding:3rem; box-shadow:0 2px 16px rgba(0,0,0,.08); }
-  h1{ font-family:"Lora","Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif; font-weight:600; font-size:1.4rem; margin:2.5rem 0 1rem; }
-  .from{ font-size:.8rem; color:var(--ink-mute); border-bottom:1px solid #ddd; padding-bottom:.3rem; margin-bottom:1.2rem; }
-  .meta{ display:flex; justify-content:space-between; gap:1rem; margin:1.5rem 0; font-size:.92rem; }
-  table{ width:100%; border-collapse:collapse; margin:1.5rem 0; }
-  th, td{ text-align:left; padding:.6rem .3rem; border-bottom:1px solid #ddd; }
-  tfoot td{ font-weight:700; border-top:2px solid var(--ink); border-bottom:none; white-space:nowrap; }
-  .hinweis{ font-size:.85rem; color:var(--ink-mute); margin-top:2rem; }
-  .footer{ font-size:.78rem; color:var(--ink-mute); margin-top:3rem; border-top:1px solid #ddd; padding-top:.8rem; }
-  .storniert{ color:var(--danger); font-weight:700; }
+  .btn{ border:none; border-radius:999px; padding:.55rem 1.3rem; font-weight:700; cursor:pointer; font-family:inherit; background:var(--sd); color:#fff; font-size:.9rem; }
+  .btn:hover{ background:#B3813F; }
+  .invoice{ background:var(--cw); border-radius:14px; padding:26px 30px; box-shadow:0 10px 34px -18px rgba(46,52,57,.3); max-width:680px; margin:0 auto 3rem; }
+  .inv-header{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid var(--ln); }
+  .brand-name{ font-family:var(--font-head); font-size:17px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--pt); }
+  .brand-tag{ font-size:11px; color:var(--ik3); margin-top:3px; }
+  .inv-meta{ text-align:right; }
+  .inv-label{ font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--sd); margin-bottom:2px; }
+  .inv-num{ font-size:19px; font-weight:700; color:var(--pt); font-family:var(--font-head); }
+  .inv-date{ font-size:11px; color:var(--ik3); margin-top:4px; line-height:1.6; }
+  .overdue{ color:#B84A3C; font-weight:700; }
+  .storniert{ color:#B84A3C; font-weight:700; margin-bottom:10px; }
+  .addresses{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:16px; }
+  .addr-label{ font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--sl); margin-bottom:5px; }
+  .addr-name{ font-size:13px; font-weight:600; color:var(--pt); margin-bottom:2px; }
+  .addr-text{ font-size:11px; color:var(--ik2); line-height:1.6; }
+  .addr-extra{ font-size:11px; color:var(--ik3); margin-top:5px; line-height:1.6; }
+  .table-wrap{ border-radius:8px; overflow:hidden; border:1px solid var(--ln); margin-bottom:12px; }
+  table{ width:100%; border-collapse:collapse; }
+  thead tr{ background:var(--pt); }
+  thead th{ padding:8px 10px; text-align:left; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.65); }
+  thead th.r{ text-align:right; }
+  tbody tr{ border-bottom:1px solid var(--ln2); }
+  tbody tr:last-child{ border-bottom:none; }
+  tbody td{ padding:8px 10px; font-size:11px; color:var(--ik2); vertical-align:top; }
+  td.r{ text-align:right; } td.c{ text-align:center; }
+  .svc-name{ font-size:12px; font-weight:600; color:var(--pt); }
+  .svc-desc{ font-size:10px; color:var(--ik3); margin-top:1px; }
+  .td-amt{ font-weight:600; color:var(--pt); text-align:right; white-space:nowrap; }
+  .totals{ padding-top:8px; border-top:2px solid var(--sd); margin-top:2px; }
+  .total-row.grand{ display:flex; justify-content:space-between; font-size:14px; font-weight:700; color:var(--pt); padding-top:4px; }
+  .grand-amt{ color:var(--sd); font-size:17px; white-space:nowrap; }
+  .payment-section{ margin-top:14px; padding-top:12px; border-top:1px solid var(--ln); }
+  .pay-label{ font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--sl); margin-bottom:8px; }
+  .pay-grid{ display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; }
+  .pi-lbl{ font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ik3); }
+  .pi-val{ font-size:12px; font-weight:500; color:var(--pt); }
+  .inv-note{ background:var(--cr); border:1px solid var(--ln); border-radius:7px; padding:11px 15px; margin-top:14px; font-size:11px; color:var(--ik2); line-height:1.6; }
+  .inv-footer{ text-align:center; margin-top:14px; padding-top:12px; border-top:1px solid var(--ln); }
+  .footer-brand{ font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--pt); margin-bottom:4px; }
+  .footer-sub{ font-size:10px; color:var(--ik3); }
+  .acc-line{ width:26px; height:2px; background:var(--sd); border-radius:2px; margin:6px auto; }
   @media print{
     body{ background:#fff; }
     .toolbar{ display:none; }
-    .sheet{ box-shadow:none; margin:0; padding:0; max-width:none; }
+    .invoice{ box-shadow:none; border-radius:0; padding:14mm 16mm; max-width:none; margin:0; }
+    @page{ margin:0; size:A4; }
   }
 </style>
 </head>
 <body>
 <div class="toolbar"><button class="btn" onclick="window.print()">Drucken / Als PDF speichern</button></div>
-<div class="sheet">
-  <div class="from"><?= htmlspecialchars($settings['sender_name']) ?> · <?= nl2br(htmlspecialchars($settings['sender_address'])) ?></div>
-  <?php if ($inv['status'] === 'storniert'): ?><p class="storniert">STORNIERT</p><?php endif; ?>
-  <div class="meta">
+<div class="invoice">
+  <div class="inv-header">
     <div>
-      <strong><?= htmlspecialchars($inv['client_name']) ?></strong><br>
-      <?php if ($inv['client_address']): ?><?= nl2br(htmlspecialchars((string) $inv['client_address'])) ?><?php endif; ?>
+      <div class="brand-name">Selbstbetrachtung</div>
+      <div class="brand-tag"><?= htmlspecialchars($settings['sender_tagline'] ?? '') ?></div>
     </div>
-    <div style="text-align:right">
-      Rechnungsnummer: <strong><?= htmlspecialchars($inv['invoice_number']) ?></strong><br>
-      Rechnungsdatum: <?= htmlspecialchars($issued) ?>
+    <div class="inv-meta">
+      <div class="inv-label">Rechnung</div>
+      <div class="inv-num"><?= htmlspecialchars($inv['invoice_number']) ?></div>
+      <div class="inv-date">
+        Ausgestellt: <?= htmlspecialchars($issued) ?><br>
+        <?php if ($due): ?>Fällig: <span class="<?= $overdue ? 'overdue' : '' ?>"><?= htmlspecialchars($due) ?><?= $overdue ? ' (überfällig)' : '' ?></span><?php endif; ?>
+      </div>
     </div>
   </div>
 
-  <h1>Rechnung</h1>
+  <?php if ($inv['status'] === 'storniert'): ?><p class="storniert">STORNIERT</p><?php endif; ?>
 
-  <table>
-    <thead><tr><th>Beschreibung</th><th>Leistungsdatum</th><th style="text-align:right">Betrag</th></tr></thead>
-    <tbody>
-      <tr>
-        <td><?= htmlspecialchars($inv['description']) ?></td>
-        <td><?= htmlspecialchars($sessionDate ?? '–') ?></td>
-        <td style="text-align:right"><?= htmlspecialchars($amount) ?></td>
-      </tr>
-    </tbody>
-    <tfoot>
-      <tr><td colspan="2">Gesamtbetrag</td><td style="text-align:right"><?= htmlspecialchars($amount) ?></td></tr>
-    </tfoot>
-  </table>
+  <div class="addresses">
+    <div>
+      <div class="addr-label">Von</div>
+      <div class="addr-name"><?= htmlspecialchars($settings['sender_name']) ?></div>
+      <div class="addr-text">Selbstbetrachtung<br><?= nl2br(htmlspecialchars($settings['sender_address'])) ?><br>Deutschland</div>
+      <div class="addr-extra">Steuernummer: <?= htmlspecialchars($settings['sender_taxid']) ?></div>
+    </div>
+    <div>
+      <div class="addr-label">An</div>
+      <div class="addr-name"><?= htmlspecialchars($inv['client_name']) ?></div>
+      <?php if ($inv['client_address']): ?><div class="addr-text"><?= nl2br(htmlspecialchars((string) $inv['client_address'])) ?></div><?php endif; ?>
+      <?php if ($inv['client_email']): ?><div class="addr-extra"><?= htmlspecialchars((string) $inv['client_email']) ?></div><?php endif; ?>
+    </div>
+  </div>
 
-  <p class="hinweis"><?= htmlspecialchars($settings['kleinunternehmer_hinweis']) ?></p>
-  <?php if ($inv['notes']): ?><p><?= nl2br(htmlspecialchars((string) $inv['notes'])) ?></p><?php endif; ?>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:40%">Leistung</th><th>Datum</th><th class="r" style="text-align:center">Menge</th><th class="r">Einzelpreis</th><th class="r">Betrag</th>
+      </tr></thead>
+      <tbody>
+      <?php foreach ($inv['items'] as $item): $lineTotal = (int) round($item['quantity'] * $item['unit_price_cents']); ?>
+        <tr>
+          <td>
+            <div class="svc-name"><?= htmlspecialchars($item['description']) ?></div>
+            <?php if ($item['detail']): ?><div class="svc-desc"><?= htmlspecialchars($item['detail']) ?></div><?php endif; ?>
+          </td>
+          <td style="white-space:nowrap"><?= $item['item_date'] ? htmlspecialchars((new DateTimeImmutable($item['item_date']))->format('d.m.Y')) : '–' ?></td>
+          <td class="c"><?= htmlspecialchars(rtrim(rtrim(number_format((float) $item['quantity'], 2, ',', ''), '0'), ',')) ?></td>
+          <td class="r"><?= htmlspecialchars(Buchhaltung::formatEuro((int) $item['unit_price_cents'])) ?></td>
+          <td class="td-amt"><?= htmlspecialchars(Buchhaltung::formatEuro($lineTotal)) ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 
-  <div class="footer">
-    <p><?= htmlspecialchars($settings['payment_terms_note']) ?></p>
-    <?php if (trim((string) $settings['sender_bank']) !== ''): ?><p><?= nl2br(htmlspecialchars($settings['sender_bank'])) ?></p><?php endif; ?>
-    <p>Steuernummer: <?= htmlspecialchars($settings['sender_taxid']) ?></p>
+  <div class="totals">
+    <div class="total-row grand"><span>Gesamtbetrag (netto)</span><span class="grand-amt"><?= htmlspecialchars(Buchhaltung::formatEuro((int) $inv['amount_cents'])) ?></span></div>
+  </div>
+
+  <?php if ($hasBank): ?>
+  <div class="payment-section">
+    <div class="pay-label">Bankverbindung</div>
+    <div class="pay-grid">
+      <div><div class="pi-lbl">Kontoinhaber</div><div class="pi-val"><?= htmlspecialchars($settings['sender_bank_inhaber']) ?></div></div>
+      <div><div class="pi-lbl">Bank</div><div class="pi-val"><?= htmlspecialchars($settings['sender_bank_name']) ?></div></div>
+      <div><div class="pi-lbl">IBAN</div><div class="pi-val"><?= htmlspecialchars($settings['sender_bank_iban']) ?></div></div>
+      <div><div class="pi-lbl">BIC</div><div class="pi-val"><?= htmlspecialchars($settings['sender_bank_bic']) ?></div></div>
+      <div style="grid-column:span 2"><div class="pi-lbl">Verwendungszweck</div><div class="pi-val"><?= htmlspecialchars($verwendungszweck) ?></div></div>
+    </div>
+  </div>
+  <?php endif; ?>
+
+  <div class="inv-note"><strong>Hinweis:</strong> <?= htmlspecialchars($settings['kleinunternehmer_hinweis']) ?> Diese Rechnung ist maschinell erstellt und ohne Unterschrift gültig.</div>
+  <?php if ($inv['notes']): ?><div class="inv-note"><?= nl2br(htmlspecialchars((string) $inv['notes'])) ?></div><?php endif; ?>
+  <?php if (trim((string) $settings['payment_terms_note']) !== ''): ?><p style="font-size:11px;color:var(--ik3);margin-top:10px"><?= htmlspecialchars($settings['payment_terms_note']) ?></p><?php endif; ?>
+
+  <div class="inv-footer">
+    <div class="footer-brand">Selbstbetrachtung</div>
+    <div class="acc-line"></div>
+    <div class="footer-sub">Vielen Dank für Ihr Vertrauen!</div>
   </div>
 </div>
 </body>
@@ -191,7 +237,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['do'] ?? '') === 'logout') 
     exit;
 }
 
-// --- Reine Lese-Aktionen mit eigenem Response-Typ (kein HTML-Seitenlayout) ---
+// --- Reine Lese-Aktion mit eigenem Response-Typ (kein HTML-Seitenlayout) ---
 if ($isLoggedIn && isset($_GET['print_invoice'])) {
     $invoice = Buchhaltung::findInvoice($pdo, (int) $_GET['print_invoice']);
     if (!$invoice) {
@@ -202,35 +248,19 @@ if ($isLoggedIn && isset($_GET['print_invoice'])) {
     exit;
 }
 
-if ($isLoggedIn && isset($_GET['download_receipt'])) {
-    $expense = Buchhaltung::findExpense($pdo, (int) $_GET['download_receipt']);
-    $path = ($expense && $expense['receipt_filename']) ? __DIR__ . '/data/belege/' . $expense['receipt_filename'] : null;
-    if (!$path || !is_file($path)) {
-        http_response_code(404);
-        exit('Beleg nicht gefunden.');
-    }
-    $downloadName = $expense['receipt_original_name'] ?: $expense['receipt_filename'];
-    header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . rawurlencode((string) $downloadName) . '"');
-    header('Content-Length: ' . (string) filesize($path));
-    readfile($path);
-    exit;
-}
-
 if ($isLoggedIn && isset($_GET['export_csv'])) {
     $exportYear = (int) $_GET['export_csv'];
     $rows = Buchhaltung::exportRows($pdo, $exportYear);
     header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="buchhaltung-' . $exportYear . '.csv"');
+    header('Content-Disposition: attachment; filename="einnahmen-' . $exportYear . '.csv"');
     echo "\xEF\xBB\xBF"; // BOM, damit Excel Umlaute korrekt anzeigt
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Datum', 'Art', 'Nr./Kategorie', 'Beschreibung', 'Betrag (EUR)'], ';', '"', '\\');
+    fputcsv($out, ['Datum (Zahlungseingang)', 'Rechnungsnummer', 'Klient*in/Firma', 'Betrag (EUR)'], ';', '"', '\\');
     foreach ($rows as $r) {
         fputcsv($out, [
             (new DateTimeImmutable($r['date']))->format('d.m.Y'),
-            $r['type'],
-            $r['ref'],
-            $r['description'],
+            $r['invoice_number'],
+            $r['client_name'],
             number_format($r['amount_cents'] / 100, 2, ',', ''),
         ], ';', '"', '\\');
     }
@@ -243,7 +273,11 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     $do = $_POST['do'] ?? '';
 
     if ($do === 'save_settings') {
-        foreach (['sender_name', 'sender_address', 'sender_taxid', 'sender_bank', 'kleinunternehmer_hinweis', 'payment_terms_note'] as $field) {
+        foreach ([
+            'sender_name', 'sender_tagline', 'sender_address', 'sender_taxid',
+            'sender_bank_inhaber', 'sender_bank_name', 'sender_bank_iban', 'sender_bank_bic',
+            'kleinunternehmer_hinweis', 'payment_terms_note',
+        ] as $field) {
             Buchhaltung::setSetting($pdo, $field, trim((string) ($_POST[$field] ?? '')));
         }
         foreach (['price_erstgespraech_cents', 'price_folgetermin_cents'] as $priceField) {
@@ -264,35 +298,50 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     if ($do === 'create_invoice') {
         $clientName = trim((string) ($_POST['client_name'] ?? ''));
         $clientAddress = trim((string) ($_POST['client_address'] ?? ''));
-        $sessionDate = trim((string) ($_POST['session_date'] ?? ''));
-        $sessionType = trim((string) ($_POST['session_type'] ?? ''));
-        $description = trim((string) ($_POST['description'] ?? ''));
+        $clientEmail = trim((string) ($_POST['client_email'] ?? ''));
         $issuedAt = trim((string) ($_POST['issued_at'] ?? ''));
+        $dueDate = trim((string) ($_POST['due_date'] ?? ''));
         $notes = trim((string) ($_POST['notes'] ?? ''));
-        $cents = Buchhaltung::parseAmountToCents((string) ($_POST['amount'] ?? ''));
 
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sessionDate)) {
-            $sessionDate = '';
-        }
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $issuedAt)) {
             $issuedAt = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d');
         }
+        if ($dueDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
+            $dueDate = '';
+        }
 
-        if ($clientName === '' || $description === '' || $cents === null || $cents <= 0) {
-            $_SESSION['flash_error'] = 'Bitte Klient*in, Beschreibung und einen gültigen Betrag angeben.';
+        $items = [];
+        foreach ((array) ($_POST['items'] ?? []) as $raw) {
+            $desc = trim((string) ($raw['description'] ?? ''));
+            $cents = Buchhaltung::parseAmountToCents((string) ($raw['unit_price'] ?? ''));
+            $qty = (float) str_replace(',', '.', (string) ($raw['quantity'] ?? '1'));
+            if ($desc === '' || $cents === null || $qty <= 0) {
+                continue;
+            }
+            $itemDate = trim((string) ($raw['item_date'] ?? ''));
+            $items[] = [
+                'description' => $desc,
+                'detail' => trim((string) ($raw['detail'] ?? '')) ?: null,
+                'item_date' => preg_match('/^\d{4}-\d{2}-\d{2}$/', $itemDate) ? $itemDate : null,
+                'quantity' => $qty,
+                'unit_price_cents' => $cents,
+            ];
+        }
+
+        if ($clientName === '' || !$items) {
+            $_SESSION['flash_error'] = 'Bitte Klient*in/Firma und mindestens eine gültige Position (Bezeichnung, Menge, Preis) angeben.';
             redirectBack('#neue-rechnung');
         }
 
         $result = Buchhaltung::createInvoice($pdo, [
             'client_name' => $clientName,
             'client_address' => $clientAddress !== '' ? $clientAddress : null,
-            'session_date' => $sessionDate !== '' ? $sessionDate : null,
-            'session_type' => $sessionType !== '' ? $sessionType : null,
-            'description' => $description,
-            'amount_cents' => $cents,
+            'client_email' => $clientEmail !== '' ? $clientEmail : null,
             'issued_at' => $issuedAt,
+            'due_date' => $dueDate !== '' ? $dueDate : null,
             'notes' => $notes !== '' ? $notes : null,
-        ]);
+        ], $items);
+
         if ($result['ok']) {
             $_SESSION['flash_success'] = 'Rechnung ' . $result['invoice_number'] . ' angelegt.';
         } else {
@@ -305,46 +354,6 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         Buchhaltung::updateInvoiceStatus($pdo, (int) ($_POST['id'] ?? 0), (string) ($_POST['status'] ?? ''));
         redirectBack('#rechnungen');
     }
-
-    if ($do === 'add_expense') {
-        $date = trim((string) ($_POST['date'] ?? ''));
-        $category = trim((string) ($_POST['category'] ?? ''));
-        $description = trim((string) ($_POST['description'] ?? ''));
-        $paymentMethod = trim((string) ($_POST['payment_method'] ?? ''));
-        $cents = Buchhaltung::parseAmountToCents((string) ($_POST['amount'] ?? ''));
-
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || $category === '' || $description === '' || $cents === null || $cents <= 0) {
-            $_SESSION['flash_error'] = 'Bitte Datum, Kategorie, Beschreibung und einen gültigen Betrag angeben.';
-            redirectBack('#neue-ausgabe');
-        }
-
-        $receiptFilename = null;
-        $receiptOriginalName = null;
-        if (!empty($_FILES['receipt']['name']) && ($_FILES['receipt']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
-            $upload = handleReceiptUpload($_FILES['receipt']);
-            if (!$upload['ok']) {
-                $_SESSION['flash_error'] = $upload['error'];
-                redirectBack('#neue-ausgabe');
-            }
-            $receiptFilename = $upload['filename'];
-            $receiptOriginalName = $upload['original_name'];
-        }
-
-        Buchhaltung::createExpense($pdo, $date, $category, $description, $cents, $paymentMethod !== '' ? $paymentMethod : null, $receiptFilename, $receiptOriginalName);
-        redirectBack('#ausgaben');
-    }
-
-    if ($do === 'delete_expense') {
-        $id = (int) ($_POST['id'] ?? 0);
-        $expense = Buchhaltung::findExpense($pdo, $id);
-        if ($expense) {
-            if ($expense['receipt_filename']) {
-                @unlink(__DIR__ . '/data/belege/' . $expense['receipt_filename']);
-            }
-            Buchhaltung::deleteExpense($pdo, $id);
-        }
-        redirectBack('#ausgaben');
-    }
 }
 
 $flashError = $_SESSION['flash_error'] ?? null;
@@ -356,7 +365,6 @@ $currentYear = (int) substr($today, 0, 4);
 
 $settings = $isLoggedIn ? Buchhaltung::allSettings($pdo) : [];
 $invoices = $isLoggedIn ? Buchhaltung::listInvoices($pdo) : [];
-$expenses = $isLoggedIn ? Buchhaltung::listExpenses($pdo) : [];
 $invoicableBookings = $isLoggedIn ? Booking::listForInvoicing($bookingPdo) : [];
 $availableYears = $isLoggedIn ? Buchhaltung::availableYears($pdo) : [];
 $csrf = $isLoggedIn ? csrfToken() : '';
@@ -370,36 +378,38 @@ if ($isLoggedIn && isset($_GET['year'])) {
 }
 $summary = $isLoggedIn ? Buchhaltung::yearSummary($pdo, $viewYear) : null;
 
-// Vorbelegung der "Neue Rechnung"-Felder, wenn von einem Termin aus verlinkt wurde
-// (siehe listForInvoicing()) – die Daten werden beim Speichern kopiert, nicht live
-// verknüpft, damit die Rechnung unabhängig vom (später ggf. gelöschten) Termin bleibt.
-$fromBooking = null;
-if ($isLoggedIn && isset($_GET['from_booking'])) {
-    $wantId = (int) $_GET['from_booking'];
-    foreach ($invoicableBookings as $b) {
-        if ((int) $b['id'] === $wantId) {
-            $fromBooking = $b;
-            break;
-        }
+// Vorbelegung der "Neue Rechnung"-Positionen, wenn von einem oder mehreren Terminen
+// aus verlinkt wurde (siehe Booking::listForInvoicing()) – die Daten werden beim
+// Speichern kopiert, nicht live verknüpft, damit die Rechnung unabhängig vom
+// (später ggf. gelöschten) Termin bleibt. Akzeptiert sowohl ?from_booking=5 (ein
+// einzelner Termin, Link aus termin-admin.php) als auch ?from_booking[]=1&...
+// (Mehrfachauswahl aus der Tabelle weiter unten).
+$rawFromBooking = $_GET['from_booking'] ?? [];
+$fromBookingIds = array_map('intval', is_array($rawFromBooking) ? $rawFromBooking : [$rawFromBooking]);
+$fromBookings = [];
+foreach ($invoicableBookings as $b) {
+    if (in_array((int) $b['id'], $fromBookingIds, true)) {
+        $fromBookings[] = $b;
     }
 }
-$fromBookingTypeLabel = $fromBooking ? (Booking::TYPES[$fromBooking['type']]['label'] ?? $fromBooking['type']) : '';
-$defaultSessionDate = $fromBooking ? $fromBooking['date'] : $today;
-$defaultDescription = $fromBooking
-    ? ('Psychologische Beratung – ' . $fromBookingTypeLabel . ' am ' . (new DateTimeImmutable($fromBooking['date']))->format('d.m.Y'))
-    : '';
-$defaultAmountValue = '';
-if ($fromBooking) {
-    $priceKey = null;
-    if ($fromBooking['type'] === 'erstgespraech') {
-        $priceKey = 'price_erstgespraech_cents';
-    } elseif ($fromBooking['type'] === 'folgetermin') {
-        $priceKey = 'price_folgetermin_cents';
-    }
-    if ($priceKey && ($settings[$priceKey] ?? '') !== '') {
-        $defaultAmountValue = Buchhaltung::centsToInputValue((int) $settings[$priceKey]);
-    }
+
+$initialItems = [];
+foreach ($fromBookings as $b) {
+    $typeLabel = Booking::TYPES[$b['type']]['label'] ?? $b['type'];
+    $priceKey = $b['type'] === 'erstgespraech' ? 'price_erstgespraech_cents' : ($b['type'] === 'folgetermin' ? 'price_folgetermin_cents' : null);
+    $price = ($priceKey && ($settings[$priceKey] ?? '') !== '') ? Buchhaltung::centsToInputValue((int) $settings[$priceKey]) : '';
+    $initialItems[] = [
+        'description' => $typeLabel,
+        'detail' => '',
+        'item_date' => $b['date'],
+        'quantity' => '1',
+        'unit_price' => $price,
+    ];
 }
+if (!$initialItems) {
+    $initialItems[] = ['description' => '', 'detail' => '', 'item_date' => $today, 'quantity' => '1', 'unit_price' => ''];
+}
+$defaultDueDate = (new DateTimeImmutable($today))->modify('+14 days')->format('Y-m-d');
 
 $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => 'Mai', 6 => 'Juni', 7 => 'Juli', 8 => 'August', 9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Dezember'];
 ?><!DOCTYPE html>
@@ -444,6 +454,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
   .badge{ display:inline-block; background:var(--cream-dark); border-radius:999px; padding:.1rem .6rem; font-size:.78rem; }
   .badge--paid{ background:var(--green); }
   .badge--cancelled{ background:var(--danger); color:#fff; }
+  .badge--overdue{ background:var(--danger); color:#fff; }
   .quicknav{ margin:0 0 1.5rem; font-size:.9rem; }
   .quicknav a{ color:var(--ink-mute); }
   .summary-cards{ display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1.25rem; }
@@ -452,6 +463,17 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
   .years a{ margin-right:.6rem; }
   .years a.active{ color:var(--ink); font-weight:700; text-decoration:underline; }
   .actions{ display:flex; gap:.4rem; flex-wrap:wrap; }
+  .pos-list{ display:flex; flex-direction:column; gap:.6rem; margin-bottom:.6rem; }
+  .pos-item{ background:#fff; border:1px solid var(--cream-dark); border-radius:10px; padding:.7rem; position:relative; }
+  .pos-item input{ width:100%; margin-top:.2rem; }
+  .pos-label{ font-size:.72rem; color:var(--ink-mute); font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .pos-actions{ position:absolute; top:.5rem; right:.5rem; display:flex; gap:.2rem; }
+  .pos-btn{ background:none; border:none; cursor:pointer; color:var(--ink-mute); font-size:.9rem; line-height:1; padding:.1rem .35rem; border-radius:4px; font-weight:700; }
+  .pos-btn:hover{ background:var(--cream-dark); }
+  .pos-btn.del:hover{ color:#fff; background:var(--danger); }
+  .pos-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:.4rem; margin-top:.4rem; }
+  .btn-add{ background:var(--cream-dark); color:var(--ink-mute); border:1px dashed var(--ink-mute); border-radius:8px; padding:.5rem; width:100%; cursor:pointer; font-family:inherit; }
+  .btn-add:hover{ background:#e2d9c8; }
 </style>
 </head>
 <body>
@@ -483,14 +505,13 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
 <?php else: ?>
 
   <h1>Buchhaltung</h1>
-  <p class="muted">Einnahmen aus Terminen, Ausgaben/Belege und Rechnungsstellung. Kleinunternehmer nach § 19 UStG – ersetzt keine steuerliche Beratung.</p>
+  <p class="muted">Rechnungsstellung für die Praxis. Kleinunternehmer nach § 19 UStG. Ausgaben/Belege werden separat als Excel-Aufstellung geführt, nicht hier.</p>
   <?php if ($flashError): ?><p class="error"><?= htmlspecialchars($flashError) ?></p><?php endif; ?>
   <?php if ($flashSuccess): ?><p class="success"><?= htmlspecialchars($flashSuccess) ?></p><?php endif; ?>
 
   <p class="quicknav">
     <a href="#uebersicht">Übersicht</a> ·
     <a href="#rechnungen">Rechnungen</a> ·
-    <a href="#ausgaben">Ausgaben</a> ·
     <a href="#export">Export</a> ·
     <a href="#einstellungen">Einstellungen</a>
   </p>
@@ -505,42 +526,40 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
 
     <div class="summary-cards">
       <div class="summary-tile"><div class="muted">Einnahmen (bezahlt)</div><div class="num"><?= htmlspecialchars(Buchhaltung::formatEuro($summary['income_total'])) ?></div></div>
-      <div class="summary-tile"><div class="muted">Ausgaben</div><div class="num"><?= htmlspecialchars(Buchhaltung::formatEuro($summary['expense_total'])) ?></div></div>
-      <div class="summary-tile"><div class="muted">Ergebnis</div><div class="num"><?= htmlspecialchars(Buchhaltung::formatEuro($summary['income_total'] - $summary['expense_total'])) ?></div></div>
       <?php if ($summary['open_cents'] > 0): ?>
       <div class="summary-tile"><div class="muted">Offene Rechnungen (alle Jahre)</div><div class="num"><?= htmlspecialchars(Buchhaltung::formatEuro($summary['open_cents'])) ?></div></div>
+      <?php endif; ?>
+      <?php if ($summary['overdue_cents'] > 0): ?>
+      <div class="summary-tile" style="border-color:var(--danger)"><div class="muted">Davon überfällig</div><div class="num" style="color:var(--danger)"><?= htmlspecialchars(Buchhaltung::formatEuro($summary['overdue_cents'])) ?></div></div>
       <?php endif; ?>
     </div>
 
     <table>
-      <thead><tr><th>Monat</th><th>Einnahmen</th><th>Ausgaben</th><th>Ergebnis</th></tr></thead>
+      <thead><tr><th>Monat</th><th>Einnahmen</th></tr></thead>
       <tbody>
-      <?php foreach ($summary['months'] as $m => $vals): ?>
-        <tr>
-          <td><?= htmlspecialchars($monthNames[$m]) ?></td>
-          <td><?= htmlspecialchars(Buchhaltung::formatEuro($vals['income_cents'])) ?></td>
-          <td><?= htmlspecialchars(Buchhaltung::formatEuro($vals['expense_cents'])) ?></td>
-          <td><?= htmlspecialchars(Buchhaltung::formatEuro($vals['income_cents'] - $vals['expense_cents'])) ?></td>
-        </tr>
+      <?php foreach ($summary['months'] as $m => $cents): ?>
+        <tr><td><?= htmlspecialchars($monthNames[$m]) ?></td><td><?= htmlspecialchars(Buchhaltung::formatEuro($cents)) ?></td></tr>
       <?php endforeach; ?>
       </tbody>
     </table>
-    <p class="muted">Einnahmen zählen nach Zahlungseingang (Zuflussprinzip der Einnahmen-Überschuss-Rechnung), nicht nach Rechnungsdatum.</p>
+    <p class="muted">Einnahmen zählen nach Zahlungseingang (Zuflussprinzip der Einnahmen-Überschuss-Rechnung), nicht nach Rechnungsdatum. Ausgaben stehen in der separaten Excel-Aufstellung.</p>
   </section>
 
   <section class="card" id="rechnungen">
     <h2>Rechnungen</h2>
     <table>
-      <thead><tr><th>Nr.</th><th>Datum</th><th>Klient*in</th><th>Beschreibung</th><th>Betrag</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Nr.</th><th>Datum</th><th>Fällig</th><th>Klient*in/Firma</th><th>Betrag</th><th>Status</th><th></th></tr></thead>
       <tbody>
-      <?php foreach ($invoices as $inv): ?>
+      <?php foreach ($invoices as $inv):
+        $isOverdue = $inv['status'] === 'offen' && $inv['due_date'] && $inv['due_date'] < $today;
+      ?>
         <tr>
           <td><?= htmlspecialchars($inv['invoice_number']) ?></td>
           <td><?= htmlspecialchars((new DateTimeImmutable($inv['issued_at']))->format('d.m.Y')) ?></td>
+          <td><?= $inv['due_date'] ? htmlspecialchars((new DateTimeImmutable($inv['due_date']))->format('d.m.Y')) : '<span class="muted">–</span>' ?></td>
           <td><?= htmlspecialchars($inv['client_name']) ?></td>
-          <td><?= htmlspecialchars($inv['description']) ?></td>
           <td><?= htmlspecialchars(Buchhaltung::formatEuro((int) $inv['amount_cents'])) ?></td>
-          <td><?= invoiceStatusBadge($inv['status']) ?></td>
+          <td><?= invoiceStatusBadge($inv['status']) ?> <?php if ($isOverdue): ?><span class="badge badge--overdue">Überfällig</span><?php endif; ?></td>
           <td>
             <div class="actions">
               <a class="btn btn--ghost" href="?print_invoice=<?= (int) $inv['id'] ?>" target="_blank" rel="noopener">Drucken</a>
@@ -579,125 +598,122 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
     </table>
 
     <?php if ($invoicableBookings): ?>
-    <h2 style="font-size:1rem; margin-top:1.5rem;">Aus Termin übernehmen</h2>
-    <p class="muted">Kommende und kürzlich vergangene Termine (letzte 60 Tage). „Übernehmen“ füllt das Formular unten vor – die Rechnung bleibt danach unabhängig vom Termin bestehen.</p>
-    <table>
-      <thead><tr><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in</th><th></th></tr></thead>
-      <tbody>
-      <?php foreach (array_slice($invoicableBookings, 0, 15) as $b): ?>
-        <tr>
-          <td><?= htmlspecialchars((new DateTimeImmutable($b['date']))->format('d.m.Y')) ?></td>
-          <td><?= htmlspecialchars($b['start_time']) ?></td>
-          <td><?= htmlspecialchars(Booking::TYPES[$b['type']]['label'] ?? $b['type']) ?></td>
-          <td><?= htmlspecialchars($b['name']) ?></td>
-          <td><a class="btn btn--ghost" href="?from_booking=<?= (int) $b['id'] ?>#neue-rechnung">Übernehmen</a></td>
-        </tr>
-      <?php endforeach; ?>
-      </tbody>
-    </table>
+    <h2 style="font-size:1rem; margin-top:1.5rem;">Aus Terminen übernehmen</h2>
+    <p class="muted">Kommende und kürzlich vergangene Termine (letzte 60 Tage). Mehrfachauswahl möglich, z. B. um mehrere Sitzungen eines Zeitraums in einer Sammelrechnung zu bündeln.</p>
+    <form method="get" action="buchhaltung-admin.php#neue-rechnung">
+      <table>
+        <thead><tr><th></th><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in</th></tr></thead>
+        <tbody>
+        <?php foreach (array_slice($invoicableBookings, 0, 20) as $b): ?>
+          <tr>
+            <td><input type="checkbox" name="from_booking[]" value="<?= (int) $b['id'] ?>"></td>
+            <td><?= htmlspecialchars((new DateTimeImmutable($b['date']))->format('d.m.Y')) ?></td>
+            <td><?= htmlspecialchars($b['start_time']) ?></td>
+            <td><?= htmlspecialchars(Booking::TYPES[$b['type']]['label'] ?? $b['type']) ?></td>
+            <td><?= htmlspecialchars($b['name']) ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+      <button type="submit" class="btn btn--ghost">Ausgewählte übernehmen</button>
+    </form>
     <?php endif; ?>
 
     <h2 id="neue-rechnung" style="font-size:1rem; margin-top:1.5rem;">Neue Rechnung</h2>
-    <?php if ($fromBooking): ?><p class="muted">Vorausgefüllt aus dem Termin von <?= htmlspecialchars($fromBooking['name']) ?> am <?= htmlspecialchars((new DateTimeImmutable($fromBooking['date']))->format('d.m.Y')) ?>.</p><?php endif; ?>
+    <?php if ($fromBookings): ?><p class="muted"><?= count($fromBookings) ?> Termin(e) übernommen – unten als Positionen vorausgefüllt, weitere Positionen können ergänzt werden.</p><?php endif; ?>
     <form method="post">
       <input type="hidden" name="do" value="create_invoice">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem;">
-        <label>Klient*in
-          <input type="text" name="client_name" value="<?= htmlspecialchars($fromBooking['name'] ?? '') ?>" required>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem; margin-bottom:1rem;">
+        <label>Klient*in / Firma
+          <input type="text" name="client_name" value="<?= htmlspecialchars($fromBookings[0]['name'] ?? '') ?>" required>
         </label>
-        <label>Anschrift (optional – ab 250 € Rechnungsbetrag empfohlen)
+        <label>E-Mail (optional)
+          <input type="email" name="client_email" value="<?= htmlspecialchars($fromBookings[0]['email'] ?? '') ?>">
+        </label>
+        <label style="grid-column:1/-1">Anschrift (optional – ab 250 € Rechnungsbetrag empfohlen)
           <textarea name="client_address" placeholder="Straße, PLZ Ort"></textarea>
-        </label>
-        <label>Leistungsdatum
-          <input type="date" name="session_date" value="<?= htmlspecialchars($defaultSessionDate) ?>">
-        </label>
-        <label>Art der Leistung
-          <input type="text" name="session_type" value="<?= htmlspecialchars($fromBookingTypeLabel) ?>" placeholder="z. B. Erstgespräch">
-        </label>
-        <label style="grid-column:1/-1">Beschreibung
-          <input type="text" name="description" value="<?= htmlspecialchars($defaultDescription) ?>" required>
-        </label>
-        <label>Betrag (€)
-          <input type="text" inputmode="decimal" name="amount" value="<?= htmlspecialchars($defaultAmountValue) ?>" placeholder="z. B. 85,00" required>
         </label>
         <label>Rechnungsdatum
           <input type="date" name="issued_at" value="<?= htmlspecialchars($today) ?>" required>
         </label>
-        <label style="grid-column:1/-1">Notizen (optional, nur intern)
-          <textarea name="notes"></textarea>
+        <label>Fällig am
+          <input type="date" name="due_date" value="<?= htmlspecialchars($defaultDueDate) ?>">
         </label>
       </div>
+
+      <div class="pos-list" id="posList">
+      <?php foreach ($initialItems as $i => $item): ?>
+        <div class="pos-item">
+          <div class="pos-actions">
+            <button type="button" class="pos-btn" onclick="movePosItem(this,-1)" title="Nach oben">▲</button>
+            <button type="button" class="pos-btn" onclick="movePosItem(this,1)" title="Nach unten">▼</button>
+            <button type="button" class="pos-btn del" onclick="delPosItem(this)" title="Entfernen">×</button>
+          </div>
+          <div class="pos-label">Bezeichnung</div>
+          <input type="text" name="items[<?= $i ?>][description]" value="<?= htmlspecialchars($item['description']) ?>" placeholder="z. B. Einzelsitzung – Psychologisches Coaching" required>
+          <div class="pos-label" style="margin-top:.4rem">Details (optional)</div>
+          <input type="text" name="items[<?= $i ?>][detail]" value="<?= htmlspecialchars($item['detail']) ?>" placeholder="z. B. 60 Min. Online-Beratung via Video">
+          <div class="pos-row">
+            <div><div class="pos-label">Datum</div><input type="date" name="items[<?= $i ?>][item_date]" value="<?= htmlspecialchars($item['item_date']) ?>"></div>
+            <div><div class="pos-label">Menge</div><input type="text" inputmode="decimal" name="items[<?= $i ?>][quantity]" value="<?= htmlspecialchars($item['quantity']) ?>"></div>
+            <div><div class="pos-label">Einzelpreis (€)</div><input type="text" inputmode="decimal" name="items[<?= $i ?>][unit_price]" value="<?= htmlspecialchars($item['unit_price']) ?>" placeholder="z. B. 70,00" required></div>
+          </div>
+        </div>
+      <?php endforeach; ?>
+      </div>
+      <button type="button" class="btn-add" onclick="addPosItem()">+ Position hinzufügen</button>
+
+      <label style="display:flex; flex-direction:column; font-size:.8rem; color:var(--ink-mute); gap:.25rem; margin-top:1rem;">Notizen (optional, nur intern)
+        <textarea name="notes"></textarea>
+      </label>
       <p><button type="submit" class="btn">Rechnung erstellen</button></p>
     </form>
-  </section>
 
-  <section class="card" id="ausgaben">
-    <h2>Ausgaben</h2>
-    <table>
-      <thead><tr><th>Datum</th><th>Kategorie</th><th>Beschreibung</th><th>Betrag</th><th>Zahlungsart</th><th>Beleg</th><th></th></tr></thead>
-      <tbody>
-      <?php foreach ($expenses as $exp): ?>
-        <tr>
-          <td><?= htmlspecialchars((new DateTimeImmutable($exp['date']))->format('d.m.Y')) ?></td>
-          <td><?= htmlspecialchars($exp['category']) ?></td>
-          <td><?= htmlspecialchars($exp['description']) ?></td>
-          <td><?= htmlspecialchars(Buchhaltung::formatEuro((int) $exp['amount_cents'])) ?></td>
-          <td><?= htmlspecialchars((string) $exp['payment_method']) ?: '<span class="muted">–</span>' ?></td>
-          <td><?php if ($exp['receipt_filename']): ?><a href="?download_receipt=<?= (int) $exp['id'] ?>">Herunterladen</a><?php else: ?><span class="muted">–</span><?php endif; ?></td>
-          <td>
-            <form method="post" style="margin:0" onsubmit="return confirm('Diese Ausgabe wirklich löschen?');">
-              <input type="hidden" name="do" value="delete_expense">
-              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-              <input type="hidden" name="id" value="<?= (int) $exp['id'] ?>">
-              <button type="submit" class="btn btn--danger">Löschen</button>
-            </form>
-          </td>
-        </tr>
-      <?php endforeach; ?>
-      <?php if (!$expenses): ?><tr><td colspan="7" class="muted">Noch keine Ausgaben erfasst.</td></tr><?php endif; ?>
-      </tbody>
-    </table>
-
-    <h2 id="neue-ausgabe" style="font-size:1rem; margin-top:1.5rem;">Neue Ausgabe</h2>
-    <datalist id="kategorien">
-      <option value="Praxisraum/Miete"><option value="Fortbildung"><option value="Fachliteratur">
-      <option value="Bürobedarf"><option value="Versicherung"><option value="Software/Abo">
-      <option value="Reisekosten"><option value="Sonstiges">
-    </datalist>
-    <datalist id="zahlungsarten">
-      <option value="Überweisung"><option value="Lastschrift"><option value="Kreditkarte"><option value="Bar">
-    </datalist>
-    <form method="post" enctype="multipart/form-data">
-      <input type="hidden" name="do" value="add_expense">
-      <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem;">
-        <label>Datum
-          <input type="date" name="date" value="<?= htmlspecialchars($today) ?>" required>
-        </label>
-        <label>Kategorie
-          <input type="text" name="category" list="kategorien" required>
-        </label>
-        <label style="grid-column:1/-1">Beschreibung
-          <input type="text" name="description" required>
-        </label>
-        <label>Betrag (€)
-          <input type="text" inputmode="decimal" name="amount" placeholder="z. B. 49,90" required>
-        </label>
-        <label>Zahlungsart (optional)
-          <input type="text" name="payment_method" list="zahlungsarten">
-        </label>
-        <label style="grid-column:1/-1">Beleg (optional, JPG/PNG/PDF, max. 8 MB)
-          <input type="file" name="receipt" accept=".jpg,.jpeg,.png,.pdf">
-        </label>
+    <template id="posTemplate">
+      <div class="pos-item">
+        <div class="pos-actions">
+          <button type="button" class="pos-btn" onclick="movePosItem(this,-1)" title="Nach oben">▲</button>
+          <button type="button" class="pos-btn" onclick="movePosItem(this,1)" title="Nach unten">▼</button>
+          <button type="button" class="pos-btn del" onclick="delPosItem(this)" title="Entfernen">×</button>
+        </div>
+        <div class="pos-label">Bezeichnung</div>
+        <input type="text" name="items[__I__][description]" placeholder="z. B. Einzelsitzung – Psychologisches Coaching" required>
+        <div class="pos-label" style="margin-top:.4rem">Details (optional)</div>
+        <input type="text" name="items[__I__][detail]" placeholder="z. B. 60 Min. Online-Beratung via Video">
+        <div class="pos-row">
+          <div><div class="pos-label">Datum</div><input type="date" name="items[__I__][item_date]"></div>
+          <div><div class="pos-label">Menge</div><input type="text" inputmode="decimal" name="items[__I__][quantity]" value="1"></div>
+          <div><div class="pos-label">Einzelpreis (€)</div><input type="text" inputmode="decimal" name="items[__I__][unit_price]" placeholder="z. B. 70,00" required></div>
+        </div>
       </div>
-      <p><button type="submit" class="btn">Ausgabe speichern</button></p>
-    </form>
+    </template>
+    <script>
+      let posCounter = <?= count($initialItems) ?>;
+      function addPosItem(){
+        const tpl = document.getElementById('posTemplate').content.cloneNode(true);
+        const idx = 'n' + (posCounter++);
+        tpl.querySelectorAll('[name]').forEach(function(el){ el.name = el.name.replace('__I__', idx); });
+        document.getElementById('posList').appendChild(tpl);
+      }
+      function movePosItem(btn, dir){
+        const item = btn.closest('.pos-item');
+        const sib = dir < 0 ? item.previousElementSibling : item.nextElementSibling;
+        if (!sib) return;
+        if (dir < 0) item.parentNode.insertBefore(item, sib);
+        else item.parentNode.insertBefore(sib, item);
+      }
+      function delPosItem(btn){
+        const list = document.getElementById('posList');
+        if (list.children.length <= 1) { alert('Mindestens eine Position wird benötigt.'); return; }
+        btn.closest('.pos-item').remove();
+      }
+    </script>
   </section>
 
   <section class="card" id="export">
     <h2>Export für den Steuerberater</h2>
-    <p class="muted">CSV-Export je Jahr (Einnahmen nach Zahlungseingang, Ausgaben nach Datum) als Arbeitsgrundlage – ersetzt keine amtliche Anlage EÜR.</p>
+    <p class="muted">CSV-Export der Einnahmen je Jahr (nach Zahlungseingang) – Arbeitsgrundlage, keine amtliche Anlage EÜR. Ausgaben stehen in der separaten Excel-Aufstellung.</p>
     <p>
       <?php foreach ($availableYears as $y): ?>
         <a class="btn btn--ghost" href="?export_csv=<?= (int) $y ?>">CSV <?= (int) $y ?></a>
@@ -710,18 +726,30 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
     <form method="post">
       <input type="hidden" name="do" value="save_settings">
       <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
-      <div class="form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem;">
         <label>Absendername (auf Rechnungen)
           <input type="text" name="sender_name" value="<?= htmlspecialchars($settings['sender_name']) ?>">
         </label>
         <label>Steuernummer
           <input type="text" name="sender_taxid" value="<?= htmlspecialchars($settings['sender_taxid']) ?>">
         </label>
+        <label style="grid-column:1/-1">Untertitel (auf Rechnungen, unter dem Praxisnamen)
+          <input type="text" name="sender_tagline" value="<?= htmlspecialchars($settings['sender_tagline'] ?? 'Psychologische Beratung & Coaching online') ?>">
+        </label>
         <label style="grid-column:1/-1">Absenderanschrift
           <textarea name="sender_address"><?= htmlspecialchars($settings['sender_address']) ?></textarea>
         </label>
-        <label style="grid-column:1/-1">Bankverbindung (optional, erscheint auf Rechnungen)
-          <textarea name="sender_bank" placeholder="z. B. IBAN"><?= htmlspecialchars($settings['sender_bank']) ?></textarea>
+        <label>Kontoinhaber
+          <input type="text" name="sender_bank_inhaber" value="<?= htmlspecialchars($settings['sender_bank_inhaber']) ?>">
+        </label>
+        <label>Bank
+          <input type="text" name="sender_bank_name" value="<?= htmlspecialchars($settings['sender_bank_name']) ?>">
+        </label>
+        <label>IBAN
+          <input type="text" name="sender_bank_iban" value="<?= htmlspecialchars($settings['sender_bank_iban']) ?>">
+        </label>
+        <label>BIC
+          <input type="text" name="sender_bank_bic" value="<?= htmlspecialchars($settings['sender_bank_bic']) ?>">
         </label>
         <label style="grid-column:1/-1">Kleinunternehmer-Hinweis (§ 19 UStG)
           <input type="text" name="kleinunternehmer_hinweis" value="<?= htmlspecialchars($settings['kleinunternehmer_hinweis']) ?>">
@@ -736,7 +764,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
           <input type="text" inputmode="decimal" name="price_folgetermin_cents" value="<?= $settings['price_folgetermin_cents'] !== '' ? htmlspecialchars(Buchhaltung::centsToInputValue((int) $settings['price_folgetermin_cents'])) : '' ?>" placeholder="noch nicht hinterlegt">
         </label>
       </div>
-      <p class="muted">Die Preise dienen nur der Vorbelegung neuer Rechnungen aus einem Termin – jede Rechnung bleibt vor dem Speichern editierbar.</p>
+      <p class="muted">Bankverbindung nur ausgefüllt nötig, falls sie auf der Rechnung erscheinen soll (IBAN leer = Abschnitt wird ausgeblendet). Die Preise dienen nur der Vorbelegung neuer Positionen aus einem Termin.</p>
       <p><button type="submit" class="btn">Einstellungen speichern</button></p>
     </form>
   </section>

@@ -2,16 +2,23 @@
 declare(strict_types=1);
 
 /**
- * Praxis-Buchhaltung: SQLite-Datenzugriff für Einstellungen, Rechnungen und Ausgaben.
+ * Praxis-Buchhaltung: SQLite-Datenzugriff für Einstellungen und Rechnungen
+ * (Positionsrechnungen, mehrere Leistungen pro Rechnung).
  *
  * Eigene Datenbankdatei (data/buchhaltung.sqlite), bewusst getrennt von
  * termine.sqlite: Klienten-Termindaten unterliegen dort einer 3-Monats-
  * Löschfrist (DSGVO, siehe Booking::purgeOldBookings()), Finanzunterlagen
  * dagegen einer gesetzlichen Aufbewahrungspflicht von i. d. R. 10 Jahren
  * (§147 AO, §14b UStG) und dürfen deshalb nicht denselben Lebenszyklus teilen.
- * Beim Anlegen einer Rechnung aus einem Termin (siehe buchhaltung-admin.php)
- * werden die nötigen Daten kopiert, nicht live referenziert – die Rechnung
- * bleibt also erhalten, auch wenn der Termin-Datensatz später gelöscht wird.
+ * Beim Anlegen einer Rechnungsposition aus einem Termin (siehe
+ * buchhaltung-admin.php) werden die nötigen Daten kopiert, nicht live
+ * referenziert – die Rechnung bleibt also erhalten, auch wenn der
+ * Termin-Datensatz später gelöscht wird.
+ *
+ * Ausgaben/Belege werden bewusst NICHT hier verwaltet, sondern als
+ * Excel-Arbeitsmappe unter D:\Selbstbetrachtung\DOX\Belege\ gepflegt
+ * (eingehende Rechnungen werden dort abgelegt und auf Zuruf eingelesen/
+ * einsortiert) – siehe Projekt-Gedächtnis.
  *
  * Geldbeträge werden durchgängig als Ganzzahl-Cent gespeichert/übergeben,
  * um Float-Rundungsfehler zu vermeiden; nur an der Formular-Grenze wird
@@ -64,14 +71,13 @@ final class Buchhaltung
             CREATE TABLE IF NOT EXISTS invoices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 invoice_number TEXT NOT NULL UNIQUE,   -- fortlaufend, Format JJJJ-NNN
-                client_name TEXT NOT NULL,
+                client_name TEXT NOT NULL,             -- Person oder Firma
                 client_address TEXT,
-                session_date TEXT,              -- \'YYYY-MM-DD\', Datum der Leistung
-                session_type TEXT,               -- freier Text, z.B. \'Erstgespräch\'
-                description TEXT NOT NULL,
-                amount_cents INTEGER NOT NULL,
+                client_email TEXT,
+                amount_cents INTEGER NOT NULL,         -- Summen-Cache über invoice_items, siehe recalcInvoiceAmount()
                 status TEXT NOT NULL DEFAULT \'offen\',  -- offen | bezahlt | storniert
                 issued_at TEXT NOT NULL,         -- \'YYYY-MM-DD\', Rechnungsdatum
+                due_date TEXT,                   -- \'YYYY-MM-DD\', Fälligkeitsdatum
                 paid_at TEXT,                    -- \'YYYY-MM-DD\', Zahlungseingang (Zufluss – zählt als Einnahme)
                 notes TEXT,
                 created_at TEXT NOT NULL,
@@ -81,19 +87,18 @@ final class Buchhaltung
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_invoices_paid ON invoices(paid_at)');
 
         $pdo->exec('
-            CREATE TABLE IF NOT EXISTS expenses (
+            CREATE TABLE IF NOT EXISTS invoice_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,              -- \'YYYY-MM-DD\'
-                category TEXT NOT NULL,
-                description TEXT NOT NULL,
-                amount_cents INTEGER NOT NULL,
-                payment_method TEXT,
-                receipt_filename TEXT,           -- zufälliger Dateiname unter data/belege/, oder NULL
-                receipt_original_name TEXT,       -- Original-Dateiname, nur für den Download-Namen
-                created_at TEXT NOT NULL
+                invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,       -- Sortierreihenfolge, 0-basiert
+                description TEXT NOT NULL,       -- Bezeichnung der Leistung
+                detail TEXT,                     -- Beschreibung/Zusatz
+                item_date TEXT,                  -- \'YYYY-MM-DD\', Datum der Leistung
+                quantity REAL NOT NULL DEFAULT 1,
+                unit_price_cents INTEGER NOT NULL
             )
         ');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)');
     }
 
     private static function now(): DateTimeImmutable
@@ -115,7 +120,7 @@ final class Buchhaltung
         return (int) round(((float) $normalized) * 100);
     }
 
-    /** Für Formular-Eingabefelder: \'123.45\' (Punkt, wie von <input type=text> mit deutschem Komma erwartet wird es beim Absenden per parseAmountToCents wieder eingelesen). */
+    /** Für Formular-Eingabefelder: \'123.45\' (Punkt; beim Absenden per parseAmountToCents wieder eingelesen). */
     public static function centsToInputValue(int $cents): string
     {
         return number_format($cents / 100, 2, '.', '');
@@ -135,7 +140,7 @@ final class Buchhaltung
     public const DEFAULT_SENDER_NAME = 'Gabriele Küppers';
     public const DEFAULT_SENDER_ADDRESS = "Dachsweg 27\n41189 Mönchengladbach";
     public const DEFAULT_SENDER_TAXID = '121/5225/6707';
-    public const DEFAULT_KLEINUNTERNEHMER_HINWEIS = 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.';
+    public const DEFAULT_KLEINUNTERNEHMER_HINWEIS = 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung).';
     public const DEFAULT_PAYMENT_TERMS = 'Bitte überweisen Sie den Betrag innerhalb von 14 Tagen unter Angabe der Rechnungsnummer.';
 
     /** @return array<string,string> alle Einstellungen als key => value */
@@ -145,7 +150,10 @@ final class Buchhaltung
             'sender_name' => self::DEFAULT_SENDER_NAME,
             'sender_address' => self::DEFAULT_SENDER_ADDRESS,
             'sender_taxid' => self::DEFAULT_SENDER_TAXID,
-            'sender_bank' => '',
+            'sender_bank_inhaber' => self::DEFAULT_SENDER_NAME,
+            'sender_bank_name' => '',
+            'sender_bank_iban' => '',
+            'sender_bank_bic' => '',
             'kleinunternehmer_hinweis' => self::DEFAULT_KLEINUNTERNEHMER_HINWEIS,
             'payment_terms_note' => self::DEFAULT_PAYMENT_TERMS,
             'price_erstgespraech_cents' => '',
@@ -185,46 +193,70 @@ final class Buchhaltung
     }
 
     // ------------------------------------------------------------------
-    // Rechnungen
+    // Rechnungen (Kopf + Positionen)
     // ------------------------------------------------------------------
 
     /**
-     * Legt eine Rechnung an und vergibt dabei die nächste fortlaufende Nummer
-     * innerhalb derselben Transaktion (BEGIN IMMEDIATE), damit zwei nahezu
-     * gleichzeitige Aufrufe (z. B. zwei offene Browser-Tabs) niemals dieselbe
-     * Nummer doppelt vergeben – analog zum Race-Condition-Schutz in
-     * Booking::createBooking().
+     * Legt eine Rechnung mit ihren Positionen an. Vergibt die nächste fortlaufende
+     * Nummer und berechnet die Summe innerhalb derselben Transaktion (BEGIN
+     * IMMEDIATE), damit zwei nahezu gleichzeitige Aufrufe niemals dieselbe Nummer
+     * doppelt vergeben – analog zum Race-Condition-Schutz in Booking::createBooking().
      *
-     * @param array{client_name:string,client_address:?string,session_date:?string,session_type:?string,description:string,amount_cents:int,issued_at:string,notes:?string} $data
+     * @param array{client_name:string,client_address:?string,client_email:?string,issued_at:string,due_date:?string,notes:?string} $header
+     * @param array<int,array{description:string,detail:?string,item_date:?string,quantity:float,unit_price_cents:int}> $items mindestens 1 Position
      * @return array{ok:bool,id?:int,invoice_number?:string,error?:string}
      */
-    public static function createInvoice(PDO $pdo, array $data): array
+    public static function createInvoice(PDO $pdo, array $header, array $items): array
     {
+        if (!$items) {
+            return ['ok' => false, 'error' => 'Eine Rechnung braucht mindestens eine Position.'];
+        }
+
         $now = self::now()->format('Y-m-d H:i:s');
-        $year = (int) substr($data['issued_at'], 0, 4);
+        $year = (int) substr($header['issued_at'], 0, 4);
+        $amountCents = 0;
+        foreach ($items as $item) {
+            $amountCents += (int) round($item['quantity'] * $item['unit_price_cents']);
+        }
 
         $pdo->exec('BEGIN IMMEDIATE');
         try {
             $number = self::nextInvoiceNumber($pdo, $year);
             $stmt = $pdo->prepare('
-                INSERT INTO invoices (invoice_number, client_name, client_address, session_date, session_type, description, amount_cents, status, issued_at, paid_at, notes, created_at, updated_at)
-                VALUES (:num, :name, :addr, :sdate, :stype, :desc, :amount, \'offen\', :issued, NULL, :notes, :created, :created)
+                INSERT INTO invoices (invoice_number, client_name, client_address, client_email, amount_cents, status, issued_at, due_date, paid_at, notes, created_at, updated_at)
+                VALUES (:num, :name, :addr, :mail, :amount, \'offen\', :issued, :due, NULL, :notes, :created, :created)
             ');
             $stmt->execute([
                 'num' => $number,
-                'name' => $data['client_name'],
-                'addr' => $data['client_address'],
-                'sdate' => $data['session_date'],
-                'stype' => $data['session_type'],
-                'desc' => $data['description'],
-                'amount' => $data['amount_cents'],
-                'issued' => $data['issued_at'],
-                'notes' => $data['notes'],
+                'name' => $header['client_name'],
+                'addr' => $header['client_address'],
+                'mail' => $header['client_email'],
+                'amount' => $amountCents,
+                'issued' => $header['issued_at'],
+                'due' => $header['due_date'],
+                'notes' => $header['notes'],
                 'created' => $now,
             ]);
-            $id = (int) $pdo->lastInsertId();
+            $invoiceId = (int) $pdo->lastInsertId();
+
+            $itemStmt = $pdo->prepare('
+                INSERT INTO invoice_items (invoice_id, position, description, detail, item_date, quantity, unit_price_cents)
+                VALUES (:iid, :pos, :desc, :detail, :date, :qty, :price)
+            ');
+            foreach (array_values($items) as $i => $item) {
+                $itemStmt->execute([
+                    'iid' => $invoiceId,
+                    'pos' => $i,
+                    'desc' => $item['description'],
+                    'detail' => $item['detail'],
+                    'date' => $item['item_date'],
+                    'qty' => $item['quantity'],
+                    'price' => $item['unit_price_cents'],
+                ]);
+            }
+
             $pdo->exec('COMMIT');
-            return ['ok' => true, 'id' => $id, 'invoice_number' => $number];
+            return ['ok' => true, 'id' => $invoiceId, 'invoice_number' => $number];
         } catch (Throwable $e) {
             $pdo->exec('ROLLBACK');
             return ['ok' => false, 'error' => 'Die Rechnung konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.'];
@@ -257,7 +289,19 @@ final class Buchhaltung
         $stmt = $pdo->prepare('SELECT * FROM invoices WHERE id = :id');
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
-        return $row ?: null;
+        if (!$row) {
+            return null;
+        }
+        $row['items'] = self::listInvoiceItems($pdo, $id);
+        return $row;
+    }
+
+    /** @return array[] Positionen einer Rechnung, in gespeicherter Reihenfolge. */
+    public static function listInvoiceItems(PDO $pdo, int $invoiceId): array
+    {
+        $stmt = $pdo->prepare('SELECT * FROM invoice_items WHERE invoice_id = :id ORDER BY position');
+        $stmt->execute(['id' => $invoiceId]);
+        return $stmt->fetchAll();
     }
 
     /** @return array[] Alle Rechnungen, neueste zuerst. */
@@ -267,74 +311,22 @@ final class Buchhaltung
     }
 
     // ------------------------------------------------------------------
-    // Ausgaben
-    // ------------------------------------------------------------------
-
-    public static function createExpense(
-        PDO $pdo,
-        string $date,
-        string $category,
-        string $description,
-        int $amountCents,
-        ?string $paymentMethod,
-        ?string $receiptFilename,
-        ?string $receiptOriginalName
-    ): int {
-        $stmt = $pdo->prepare('
-            INSERT INTO expenses (date, category, description, amount_cents, payment_method, receipt_filename, receipt_original_name, created_at)
-            VALUES (:date, :cat, :desc, :amount, :pm, :file, :orig, :created)
-        ');
-        $stmt->execute([
-            'date' => $date,
-            'cat' => $category,
-            'desc' => $description,
-            'amount' => $amountCents,
-            'pm' => $paymentMethod,
-            'file' => $receiptFilename,
-            'orig' => $receiptOriginalName,
-            'created' => self::now()->format('Y-m-d H:i:s'),
-        ]);
-        return (int) $pdo->lastInsertId();
-    }
-
-    public static function findExpense(PDO $pdo, int $id): ?array
-    {
-        $stmt = $pdo->prepare('SELECT * FROM expenses WHERE id = :id');
-        $stmt->execute(['id' => $id]);
-        $row = $stmt->fetch();
-        return $row ?: null;
-    }
-
-    public static function deleteExpense(PDO $pdo, int $id): void
-    {
-        $stmt = $pdo->prepare('DELETE FROM expenses WHERE id = :id');
-        $stmt->execute(['id' => $id]);
-    }
-
-    /** @return array[] Alle Ausgaben, neueste zuerst. */
-    public static function listExpenses(PDO $pdo): array
-    {
-        return $pdo->query('SELECT * FROM expenses ORDER BY date DESC, id DESC')->fetchAll();
-    }
-
-    // ------------------------------------------------------------------
     // Auswertung
     // ------------------------------------------------------------------
 
     /**
-     * Jahresübersicht je Monat. Einnahmen zählen nach Zahlungseingang (paid_at),
-     * nicht nach Rechnungsdatum – Zuflussprinzip der Einnahmen-Überschuss-Rechnung
-     * (§4 Abs. 3 EStG): eine im Dezember gestellte, erst im Januar bezahlte
-     * Rechnung zählt zum Folgejahr.
+     * Jahresübersicht je Monat: Einnahmen aus bezahlten Rechnungen, gezählt nach
+     * Zahlungseingang (paid_at), nicht nach Rechnungsdatum – Zuflussprinzip der
+     * Einnahmen-Überschuss-Rechnung (§4 Abs. 3 EStG): eine im Dezember gestellte,
+     * erst im Januar bezahlte Rechnung zählt zum Folgejahr. Ausgaben werden
+     * separat als Excel-Arbeitsmappe geführt (siehe Klassenkommentar) und
+     * erscheinen deshalb hier nicht.
      *
-     * @return array{months:array<int,array{income_cents:int,expense_cents:int}>,income_total:int,expense_total:int,open_cents:int}
+     * @return array{months:array<int,int>,income_total:int,open_cents:int,overdue_cents:int}
      */
     public static function yearSummary(PDO $pdo, int $year): array
     {
-        $months = [];
-        for ($m = 1; $m <= 12; $m++) {
-            $months[$m] = ['income_cents' => 0, 'expense_cents' => 0];
-        }
+        $months = array_fill(1, 12, 0);
 
         $stmt = $pdo->prepare("
             SELECT CAST(substr(paid_at, 6, 2) AS INTEGER) AS month, SUM(amount_cents) AS total
@@ -345,42 +337,30 @@ final class Buchhaltung
         $incomeTotal = 0;
         foreach ($stmt->fetchAll() as $row) {
             $cents = (int) $row['total'];
-            $months[(int) $row['month']]['income_cents'] = $cents;
+            $months[(int) $row['month']] = $cents;
             $incomeTotal += $cents;
         }
 
-        $stmt = $pdo->prepare("
-            SELECT CAST(substr(date, 6, 2) AS INTEGER) AS month, SUM(amount_cents) AS total
-            FROM expenses WHERE substr(date, 1, 4) = :y
-            GROUP BY month
-        ");
-        $stmt->execute(['y' => (string) $year]);
-        $expenseTotal = 0;
-        foreach ($stmt->fetchAll() as $row) {
-            $cents = (int) $row['total'];
-            $months[(int) $row['month']]['expense_cents'] = $cents;
-            $expenseTotal += $cents;
-        }
+        $openCents = (int) $pdo->query("SELECT COALESCE(SUM(amount_cents), 0) FROM invoices WHERE status = 'offen'")->fetchColumn();
 
-        $stmt = $pdo->query("SELECT COALESCE(SUM(amount_cents), 0) AS total FROM invoices WHERE status = 'offen'");
-        $openCents = (int) $stmt->fetchColumn();
+        $today = self::now()->format('Y-m-d');
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(amount_cents), 0) FROM invoices WHERE status = 'offen' AND due_date IS NOT NULL AND due_date < :today");
+        $stmt->execute(['today' => $today]);
+        $overdueCents = (int) $stmt->fetchColumn();
 
         return [
             'months' => $months,
             'income_total' => $incomeTotal,
-            'expense_total' => $expenseTotal,
             'open_cents' => $openCents,
+            'overdue_cents' => $overdueCents,
         ];
     }
 
-    /** Jahre, für die es Buchungen gibt (für die Jahresauswahl in Übersicht/Export), plus das laufende Jahr. */
+    /** Jahre, für die es Rechnungen gibt (für die Jahresauswahl in Übersicht/Export), plus das laufende Jahr. */
     public static function availableYears(PDO $pdo): array
     {
         $years = [(int) self::now()->format('Y') => true];
         foreach ($pdo->query('SELECT DISTINCT substr(issued_at, 1, 4) AS y FROM invoices') as $r) {
-            $years[(int) $r['y']] = true;
-        }
-        foreach ($pdo->query('SELECT DISTINCT substr(date, 1, 4) AS y FROM expenses') as $r) {
             $years[(int) $r['y']] = true;
         }
         $list = array_keys($years);
@@ -389,37 +369,28 @@ final class Buchhaltung
     }
 
     /**
-     * CSV-Zeilen (Einnahmen nach Zahlungseingang + Ausgaben nach Datum) für ein Jahr,
-     * chronologisch – Arbeitsgrundlage für den Steuerberater, keine amtliche Anlage EÜR.
+     * CSV-Zeilen der Einnahmen (bezahlte Rechnungen, nach Zahlungseingang) für ein
+     * Jahr – Arbeitsgrundlage für den Steuerberater bzw. zur Zusammenführung mit
+     * der Ausgaben-Arbeitsmappe, keine amtliche Anlage EÜR.
      *
-     * @return array<int,array{date:string,type:string,ref:string,description:string,amount_cents:int}>
+     * @return array<int,array{date:string,invoice_number:string,client_name:string,amount_cents:int}>
      */
     public static function exportRows(PDO $pdo, int $year): array
     {
-        $rows = [];
-        $stmt = $pdo->prepare("SELECT invoice_number, paid_at, description, amount_cents FROM invoices WHERE status = 'bezahlt' AND substr(paid_at, 1, 4) = :y");
+        $stmt = $pdo->prepare("
+            SELECT invoice_number, paid_at, client_name, amount_cents FROM invoices
+            WHERE status = 'bezahlt' AND substr(paid_at, 1, 4) = :y ORDER BY paid_at
+        ");
         $stmt->execute(['y' => (string) $year]);
+        $rows = [];
         foreach ($stmt->fetchAll() as $r) {
             $rows[] = [
                 'date' => (string) $r['paid_at'],
-                'type' => 'Einnahme',
-                'ref' => (string) $r['invoice_number'],
-                'description' => (string) $r['description'],
+                'invoice_number' => (string) $r['invoice_number'],
+                'client_name' => (string) $r['client_name'],
                 'amount_cents' => (int) $r['amount_cents'],
             ];
         }
-        $stmt = $pdo->prepare('SELECT id, date, category, description, amount_cents FROM expenses WHERE substr(date, 1, 4) = :y');
-        $stmt->execute(['y' => (string) $year]);
-        foreach ($stmt->fetchAll() as $r) {
-            $rows[] = [
-                'date' => (string) $r['date'],
-                'type' => 'Ausgabe',
-                'ref' => (string) $r['category'],
-                'description' => (string) $r['description'],
-                'amount_cents' => (int) $r['amount_cents'],
-            ];
-        }
-        usort($rows, static fn(array $a, array $b): int => $a['date'] <=> $b['date']);
         return $rows;
     }
 }
