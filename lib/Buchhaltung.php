@@ -67,6 +67,12 @@ final class Buchhaltung
             )
         ');
 
+        // Migration von der allerersten Version (ein Betrag/Beschreibung pro Rechnung,
+        // ohne due_date/client_email) auf das aktuelle Positionsrechnungs-Schema.
+        // Muss VOR dem CREATE TABLE IF NOT EXISTS laufen, sonst bleibt eine bereits
+        // bestehende Alt-Tabelle unverändert (kein automatisches ALTER durch SQLite).
+        self::migrateLegacyInvoicesTable($pdo);
+
         $pdo->exec('
             CREATE TABLE IF NOT EXISTS invoices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,6 +105,109 @@ final class Buchhaltung
             )
         ');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)');
+    }
+
+    /**
+     * Migriert eine `invoices`-Tabelle aus der allerersten Version (ein Betrag/eine
+     * Beschreibung pro Rechnung, Spalten `description`/`session_date`/`session_type`,
+     * keine `due_date`/`client_email`) auf das aktuelle Schema. SQLite kann eine
+     * NOT-NULL-Spalte nicht per ALTER TABLE entfernen, deshalb: Tabelle umbenennen,
+     * neu anlegen, Daten spaltenweise übernehmen, alte Beschreibung/Betrag als
+     * einzelne invoice_items-Position rekonstruieren, damit nichts verloren geht.
+     * No-op, wenn die Tabelle nicht existiert (Erstinstallation) oder bereits aktuell ist.
+     */
+    private static function migrateLegacyInvoicesTable(PDO $pdo): void
+    {
+        $exists = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='invoices'")->fetchColumn();
+        if (!$exists) {
+            return;
+        }
+        $cols = array_column($pdo->query('PRAGMA table_info(invoices)')->fetchAll(), 'name');
+        if (in_array('due_date', $cols, true) && in_array('client_email', $cols, true)) {
+            return; // schon aktuelles Schema
+        }
+
+        // WICHTIG: invoice_items darf während des Umbenennens nicht (mehr) existieren.
+        // SQLite lässt beim ALTER TABLE ... RENAME die REFERENCES-Klausel abhängiger
+        // Tabellen automatisch mitwandern (invoice_items würde danach dauerhaft auf
+        // "invoices_legacy" statt "invoices" verweisen, auch nach COMMIT) – jede spätere
+        // Rechnung würde dann mit "no such table: invoices_legacy" fehlschlagen. Ein
+        // Zwischendeploy hat invoice_items evtl. schon (leer, per CREATE TABLE IF NOT
+        // EXISTS) angelegt, deshalb hier vorsorglich droppen und ganz am Ende – nach dem
+        // Umbenennen und Löschen von invoices_legacy, mit "invoices" in seiner
+        // endgültigen Form – sauber neu anlegen. Alte Positionsdaten vorher nach PHP
+        // auslesen, da invoices_legacy zu dem Zeitpunkt schon weg ist.
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $legacyRows = $pdo->query('SELECT * FROM invoices')->fetchAll();
+
+            $pdo->exec('DROP TABLE IF EXISTS invoice_items');
+            $pdo->exec('ALTER TABLE invoices RENAME TO invoices_legacy');
+            $pdo->exec('
+                CREATE TABLE invoices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_number TEXT NOT NULL UNIQUE,
+                    client_name TEXT NOT NULL,
+                    client_address TEXT,
+                    client_email TEXT,
+                    amount_cents INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT \'offen\',
+                    issued_at TEXT NOT NULL,
+                    due_date TEXT,
+                    paid_at TEXT,
+                    notes TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ');
+            $legacyCols = array_column($pdo->query('PRAGMA table_info(invoices_legacy)')->fetchAll(), 'name');
+            $expr = static fn(string $col): string => in_array($col, $legacyCols, true) ? $col : 'NULL';
+            $pdo->exec('
+                INSERT INTO invoices (id, invoice_number, client_name, client_address, client_email, amount_cents, status, issued_at, due_date, paid_at, notes, created_at, updated_at)
+                SELECT id, invoice_number, client_name, client_address, ' . $expr('client_email') . ', amount_cents, status, issued_at, ' . $expr('due_date') . ', paid_at, notes, created_at, updated_at
+                FROM invoices_legacy
+            ');
+            $pdo->exec('DROP TABLE invoices_legacy');
+
+            // Erst jetzt, mit "invoices" in seiner endgültigen Form und ohne dass je eine
+            // Umbenennung stattgefunden hätte, invoice_items mit sauberer FK anlegen.
+            $pdo->exec('
+                CREATE TABLE IF NOT EXISTS invoice_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    description TEXT NOT NULL,
+                    detail TEXT,
+                    item_date TEXT,
+                    quantity REAL NOT NULL DEFAULT 1,
+                    unit_price_cents INTEGER NOT NULL
+                )
+            ');
+
+            // Alte Beschreibung/Betrag je Rechnung als eine invoice_items-Position rekonstruieren,
+            // damit bestehende Rechnungen weiter eine (Mindest-)Position haben. Aus den vorher
+            // ausgelesenen PHP-Zeilen, da invoices_legacy zu diesem Zeitpunkt schon weg ist.
+            if ($legacyRows && array_key_exists('description', $legacyRows[0])) {
+                $itemStmt = $pdo->prepare('
+                    INSERT INTO invoice_items (invoice_id, position, description, detail, item_date, quantity, unit_price_cents)
+                    VALUES (:iid, 0, :desc, :detail, :date, 1, :price)
+                ');
+                foreach ($legacyRows as $row) {
+                    $itemStmt->execute([
+                        'iid' => $row['id'],
+                        'desc' => ($row['description'] ?? '') !== '' ? $row['description'] : 'Leistung',
+                        'detail' => $row['session_type'] ?? null,
+                        'date' => $row['session_date'] ?? null,
+                        'price' => $row['amount_cents'],
+                    ]);
+                }
+            }
+
+            $pdo->exec('COMMIT');
+        } catch (Throwable $e) {
+            $pdo->exec('ROLLBACK');
+            throw $e;
+        }
     }
 
     private static function now(): DateTimeImmutable
