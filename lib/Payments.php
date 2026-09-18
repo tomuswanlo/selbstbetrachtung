@@ -119,7 +119,9 @@ final class Payments
         if (abs(time() - (int) $timestamp) > 300) {
             return false;
         }
-        $expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, STRIPE_WEBHOOK_SECRET);
+        // trim(): gleicher Grund wie bei STRIPE_SECRET_KEY in stripeRequest() – schützt
+        // vor unsichtbaren Zeichen aus manuellem Copy-Paste in stripe_config.php.
+        $expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, trim(STRIPE_WEBHOOK_SECRET));
         foreach ($signatures as $sig) {
             if (hash_equals($expected, $sig)) {
                 return true;
@@ -323,7 +325,7 @@ final class Payments
             'transmission_id' => $headers['paypal-transmission-id'] ?? '',
             'transmission_sig' => $headers['paypal-transmission-sig'] ?? '',
             'transmission_time' => $headers['paypal-transmission-time'] ?? '',
-            'webhook_id' => PAYPAL_WEBHOOK_ID,
+            'webhook_id' => trim(PAYPAL_WEBHOOK_ID),
             'webhook_event' => $eventBody,
         ];
         $result = self::paypalRequest('POST', '/v1/notifications/verify-webhook-signature', $auth['token'], $payload);
