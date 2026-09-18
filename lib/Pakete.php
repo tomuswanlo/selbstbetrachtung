@@ -222,6 +222,18 @@ final class Pakete
         $stmt->execute(['id' => $logId]);
     }
 
+    /**
+     * Bucht die Verbrauchsbuchung(en) eines stornierten Termins wieder gut (siehe
+     * Booking::processCancellationRefund() – nur bei rechtzeitiger Absage). Löscht
+     * statt nur den Stundenwert zu ändern, damit die Buchung im Verbrauchslog
+     * sauber verschwindet statt als "0 Std." stehen zu bleiben.
+     */
+    public static function refundUsageForBooking(PDO $pdo, string $bookingId): void
+    {
+        $stmt = $pdo->prepare('DELETE FROM package_usage_log WHERE booking_id = :bid');
+        $stmt->execute(['bid' => $bookingId]);
+    }
+
     /** @return array[] Verbrauchsbuchungen eines Pakets, neueste zuerst. */
     public static function usageLog(PDO $pdo, int $packageId): array
     {

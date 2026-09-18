@@ -85,6 +85,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
       <p class="error">Dieser Link ist ungültig oder abgelaufen. Bitte kontaktieren Sie uns direkt unter <a href="mailto:kontakt@selbstbetrachtung-online.de">kontakt@selbstbetrachtung-online.de</a>.</p>
     <?php elseif ($justCancelled): ?>
       <p class="ok">Ihr Termin wurde storniert.</p>
+      <?php if ($booking['payment_status'] === 'refunded'): ?>
+        <p>Ihre Paketstunde wurde Ihnen gutgeschrieben.</p>
+      <?php elseif ($booking['payment_status'] === 'refund_pending'): ?>
+        <p>Ihre Online-Zahlung wird zeitnah erstattet.</p>
+      <?php elseif (in_array($booking['payment_status'], ['paid', 'package'], true)): ?>
+        <p>Da die Absage weniger als <?= Booking::REFUND_LEAD_HOURS ?> Stunden vor dem Termin erfolgt, verfällt die Zahlung bzw. Paketstunde gemäß unserer AGB.</p>
+      <?php endif; ?>
       <p>Sie können jederzeit über die Website einen neuen Termin buchen.</p>
       <p><a href="/termin.php">Neuen Termin buchen</a></p>
     <?php elseif ($booking['status'] === 'cancelled'): ?>

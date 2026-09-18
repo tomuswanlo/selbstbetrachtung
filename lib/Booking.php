@@ -18,6 +18,9 @@ final class Booking
     /** Mindestvorlauf, bevor ein Slot buchbar ist (Stunden) */
     public const MIN_LEAD_HOURS = 24;
 
+    /** Ab wie viel Vorlauf eine Stornierung noch eine Rückbuchung/Erstattung auslöst (Stunden), siehe AGB-Stornofrist. */
+    public const REFUND_LEAD_HOURS = 24;
+
     /** Wie weit im Voraus gebucht werden kann (Tage) */
     public const MAX_ADVANCE_DAYS = 90;
 
@@ -581,6 +584,10 @@ final class Booking
         $stmt = $pdo->prepare('UPDATE bookings SET status = \'cancelled\', cancelled_at = :now, cancelled_by = :by WHERE id = :id');
         $stmt->execute(['now' => self::now()->format('Y-m-d H:i:s'), 'by' => $cancelledBy, 'id' => $booking['id']]);
         $booking['status'] = 'cancelled';
+        $newPaymentStatus = self::processCancellationRefund($pdo, $booking);
+        if ($newPaymentStatus !== null) {
+            $booking['payment_status'] = $newPaymentStatus;
+        }
         return ['ok' => true, 'booking' => $booking];
     }
 
@@ -595,7 +602,60 @@ final class Booking
         $upd = $pdo->prepare('UPDATE bookings SET status = \'cancelled\', cancelled_at = :now, cancelled_by = :by WHERE id = :id');
         $upd->execute(['now' => self::now()->format('Y-m-d H:i:s'), 'by' => $cancelledBy, 'id' => $id]);
         $booking['status'] = 'cancelled';
+        $newPaymentStatus = self::processCancellationRefund($pdo, $booking);
+        if ($newPaymentStatus !== null) {
+            $booking['payment_status'] = $newPaymentStatus;
+        }
         return ['ok' => true, 'booking' => $booking];
+    }
+
+    /**
+     * Bucht bei rechtzeitiger Stornierung (>= REFUND_LEAD_HOURS vor Terminbeginn, siehe
+     * AGB-Stornofrist) die Bezahlung zurück: eine Paketstunde wird automatisch wieder
+     * gutgeschrieben (kein echtes Geld, risikolos), eine Online-Zahlung (Stripe/PayPal)
+     * wird NUR als "zu erstatten" markiert – die eigentliche Erstattung bleibt bewusst
+     * eine manuelle Aktion im jeweiligen Dashboard, damit bei echtem Geld niemals eine
+     * unbeaufsichtigte automatische Buchung durch einen bloßen Storno-Link-Aufruf
+     * ausgelöst wird. Bei Absage < REFUND_LEAD_HOURS vorher verfällt die Zahlung/Stunde
+     * (wie in den AGB beschrieben) – hier passiert dann nichts.
+     */
+    /** @return string|null neuer payment_status, falls geändert (sonst null) */
+    private static function processCancellationRefund(PDO $pdo, array $booking): ?string
+    {
+        $start = new DateTimeImmutable($booking['date'] . ' ' . $booking['start_time'], new DateTimeZone('Europe/Berlin'));
+        $leadHours = (self::now()->getTimestamp() - $start->getTimestamp()) / -3600;
+        if ($leadHours < self::REFUND_LEAD_HOURS) {
+            return null;
+        }
+
+        if ($booking['payment_status'] === 'package' && $booking['package_id']) {
+            require_once __DIR__ . '/Pakete.php';
+            require_once __DIR__ . '/Buchhaltung.php';
+            Pakete::refundUsageForBooking(Buchhaltung::db(), (string) $booking['id']);
+            $upd = $pdo->prepare("UPDATE bookings SET payment_status = 'refunded' WHERE id = :id");
+            $upd->execute(['id' => $booking['id']]);
+            return 'refunded';
+        }
+        if ($booking['payment_status'] === 'paid') {
+            $upd = $pdo->prepare("UPDATE bookings SET payment_status = 'refund_pending' WHERE id = :id");
+            $upd->execute(['id' => $booking['id']]);
+            return 'refund_pending';
+        }
+        // 'pending'/'none'/'refund_pending'/'refunded': nichts zu tun.
+        return null;
+    }
+
+    /** Noch nicht manuell erstattete, online bezahlte und danach stornierte Termine (für den Admin-Hinweis). */
+    public static function listRefundPending(PDO $pdo): array
+    {
+        return $pdo->query("SELECT * FROM bookings WHERE payment_status = 'refund_pending' ORDER BY cancelled_at DESC")->fetchAll();
+    }
+
+    /** Markiert eine Online-Zahlung als (manuell, im Stripe-/PayPal-Dashboard) erstattet. */
+    public static function markRefunded(PDO $pdo, int $bookingId): void
+    {
+        $stmt = $pdo->prepare("UPDATE bookings SET payment_status = 'refunded' WHERE id = :id");
+        $stmt->execute(['id' => $bookingId]);
     }
 
     /** @return array[] Kommende, bestätigte Termine/Sperren, chronologisch */

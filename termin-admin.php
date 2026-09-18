@@ -145,6 +145,11 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         redirectBack();
     }
 
+    if ($do === 'mark_refunded') {
+        Booking::markRefunded($pdo, (int) ($_POST['id'] ?? 0));
+        redirectBack();
+    }
+
     if ($do === 'cancel_block_group') {
         $ids = array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))));
         Booking::cancelGroup($pdo, $ids, 'admin');
@@ -155,6 +160,7 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
 $flashError = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_error']);
 
+$refundPending = $isLoggedIn ? Booking::listRefundPending($pdo) : [];
 $rules = $isLoggedIn ? Booking::listRules($pdo) : [];
 $blockedGroups = $isLoggedIn ? Booking::listBlockedDateGroups($pdo) : [];
 $upcomingAll = $isLoggedIn ? Booking::listUpcoming($pdo) : [];
@@ -279,6 +285,34 @@ if (isset($_GET['edit_block'])) {
 
   <h1>Terminverwaltung</h1>
   <?php if ($flashError): ?><p class="error"><?= htmlspecialchars($flashError) ?></p><?php endif; ?>
+
+  <?php if ($refundPending): ?>
+  <section class="card" style="border-color:var(--danger);">
+    <h2>Offene Erstattungen</h2>
+    <p class="muted">Diese Termine wurden online bezahlt und danach rechtzeitig (≥ <?= Booking::REFUND_LEAD_HOURS ?>h vorher) storniert – die Zahlung wurde <strong>nicht</strong> automatisch erstattet. Bitte manuell im Stripe-/PayPal-Dashboard erstatten (Referenz siehe unten), danach hier abhaken.</p>
+    <table>
+      <thead><tr><th>Datum</th><th>Klient*in</th><th>Anbieter</th><th>Referenz</th><th></th></tr></thead>
+      <tbody>
+      <?php foreach ($refundPending as $r): ?>
+        <tr>
+          <td><?= htmlspecialchars((new DateTimeImmutable($r['date']))->format('d.m.Y')) ?>, <?= htmlspecialchars($r['start_time']) ?> Uhr</td>
+          <td><?= htmlspecialchars($r['name']) ?><?php if ($r['email']): ?><br><span class="muted"><?= htmlspecialchars($r['email']) ?></span><?php endif; ?></td>
+          <td><?= htmlspecialchars($r['payment_provider'] === 'paypal' ? 'PayPal' : 'Stripe (Karte/SEPA)') ?></td>
+          <td><code style="font-size:.78rem; word-break:break-all;"><?= htmlspecialchars((string) $r['payment_reference']) ?></code></td>
+          <td>
+            <form method="post" style="margin:0">
+              <input type="hidden" name="do" value="mark_refunded">
+              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+              <input type="hidden" name="id" value="<?= (int) $r['id'] ?>">
+              <button type="submit" class="btn">Als erstattet markieren</button>
+            </form>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </section>
+  <?php endif; ?>
 
   <section class="card">
     <h2>Kommende Termine</h2>
