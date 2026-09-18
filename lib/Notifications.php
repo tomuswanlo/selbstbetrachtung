@@ -181,3 +181,96 @@ function sendPackagePaidConfirmation(int $packageId): void
         error_log('Praxis-Benachrichtigung (Paket-Kauf) fehlgeschlagen: ' . $e->getMessage());
     }
 }
+
+/**
+ * Verschickt die Bestätigung, wenn ein Termin auf termin-bezahlen.php per
+ * Paket-Code (statt Stripe/PayPal) bezahlt wurde – mit dem verbleibenden
+ * Restguthaben, damit der Klient weiß, wie viele Stunden noch übrig sind.
+ * Muss NACH Pakete::logUsage() aufgerufen werden, damit hoursRemaining()
+ * bereits den aktuellen (verringerten) Stand zurückgibt.
+ */
+function sendPackageRedeemedConfirmation(int $bookingId, int $packageId): void
+{
+    require_once __DIR__ . '/Booking.php';
+    require_once __DIR__ . '/Pakete.php';
+    require_once __DIR__ . '/Buchhaltung.php';
+    $bookingPdo = Booking::db();
+    $stmt = $bookingPdo->prepare('SELECT * FROM bookings WHERE id = :id');
+    $stmt->execute(['id' => $bookingId]);
+    $booking = $stmt->fetch();
+    if (!$booking || !$booking['email']) {
+        return;
+    }
+    $buchhaltungPdo = Buchhaltung::db();
+    $pkg = Pakete::findById($buchhaltungPdo, $packageId);
+    if (!$pkg) {
+        return;
+    }
+
+    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    if (!file_exists($smtpConfigFile)) {
+        return;
+    }
+    require_once $smtpConfigFile;
+    require_once __DIR__ . '/PHPMailer/src/Exception.php';
+    require_once __DIR__ . '/PHPMailer/src/PHPMailer.php';
+    require_once __DIR__ . '/PHPMailer/src/SMTP.php';
+
+    $typeLabel = Booking::TYPES[$booking['type']]['label'] ?? $booking['type'];
+    $dateFormatted = (new DateTimeImmutable($booking['date']))->format('d.m.Y');
+    $cancelUrl = baseUrl() . '/termin-absagen.php?token=' . urlencode((string) $booking['cancel_token']);
+    $remaining = Pakete::hoursRemaining($buchhaltungPdo, $pkg);
+    $remainingLabel = rtrim(rtrim(number_format($remaining, 1, ',', ''), '0'), ',');
+    $totalHours = (int) $pkg['hours_total'];
+
+    try {
+        $confirm = new PHPMailer\PHPMailer\PHPMailer(true);
+        $confirm->isSMTP();
+        $confirm->Host = SMTP_HOST;
+        $confirm->SMTPAuth = true;
+        $confirm->Username = SMTP_USER;
+        $confirm->Password = SMTP_PASS;
+        $confirm->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $confirm->Port = SMTP_PORT;
+        $confirm->CharSet = 'UTF-8';
+        $confirm->setFrom(SMTP_USER, 'Gabriele Küppers – Selbstbetrachtung');
+        $confirm->addAddress($booking['email'], $booking['name']);
+        $confirm->Subject = "Mit Paket bezahlt: {$typeLabel} am {$dateFormatted}, {$booking['start_time']} Uhr";
+        $confirm->Body =
+            "Liebe/r {$booking['name']},\n\n" .
+            "Ihr Termin ist bestätigt und wurde mit einer Stunde von Ihrem {$totalHours}-Stunden-Paket bezahlt:\n\n" .
+            "{$typeLabel}\n" .
+            "{$dateFormatted}, {$booking['start_time']}–{$booking['end_time']} Uhr\n\n" .
+            "Sie haben noch ein Guthaben von {$remainingLabel} von {$totalHours} Stunden auf Ihrem Paket übrig.\n\n" .
+            "Sollten Sie den Termin nicht wahrnehmen können, sagen Sie ihn bitte hier ab:\n" .
+            "{$cancelUrl}\n\n" .
+            "Bitte beachten Sie: Bei einer Absage weniger als 24 Stunden vor dem Termin wird die Stunde trotz Absage " .
+            "von Ihrem Paket abgezogen (siehe AGB).\n\n" .
+            "Diese Bestätigung wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
+            "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
+            "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n";
+        $confirm->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Paket-Einlösung-Bestätigung an Klient*in fehlgeschlagen: ' . $e->getMessage());
+    }
+
+    try {
+        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = SMTP_USER;
+        $mail->Password = SMTP_PASS;
+        $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $mail->Port = SMTP_PORT;
+        $mail->CharSet = 'UTF-8';
+        $mail->setFrom(SMTP_USER, 'Selbstbetrachtung Website');
+        $mail->addAddress(MAIL_TO);
+        $mail->addReplyTo($booking['email'], $booking['name']);
+        $mail->Subject = "Mit Paket bezahlter Termin: {$typeLabel} am {$dateFormatted}, {$booking['start_time']} Uhr";
+        $mail->Body = "Termin mit Paketstunde bezahlt.\n\nName: {$booking['name']}\nE-Mail: {$booking['email']}\n{$typeLabel} am {$dateFormatted}, {$booking['start_time']}–{$booking['end_time']} Uhr\nRestguthaben auf dem Paket: {$remainingLabel} von {$totalHours} Std.\n";
+        $mail->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Praxis-Benachrichtigung (Paket-Einlösung) fehlgeschlagen: ' . $e->getMessage());
+    }
+}

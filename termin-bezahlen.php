@@ -19,6 +19,7 @@ require __DIR__ . '/lib/Buchhaltung.php';
 require __DIR__ . '/lib/Pakete.php';
 require __DIR__ . '/lib/Vertrag.php';
 require __DIR__ . '/lib/Payments.php';
+require __DIR__ . '/lib/Notifications.php';
 
 function tbBaseUrl(): string
 {
@@ -113,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             Booking::markSessionUsingPackage($bookingPdo, (int) $booking['id'], (int) $package['id']);
             Pakete::logUsage($buchhaltungPdo, (int) $package['id'], 1.0, (string) $booking['id'], 'Termin am ' . $dateFormatted . ', ' . $booking['start_time'] . ' Uhr');
+            sendPackageRedeemedConfirmation((int) $booking['id'], (int) $package['id']);
             $packageSuccess = true;
         }
     } else {
