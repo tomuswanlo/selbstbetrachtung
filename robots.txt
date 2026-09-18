@@ -9,6 +9,7 @@ Disallow: /buchhaltung-admin.php
 Disallow: /paket-kaufen.php
 Disallow: /paket-api.php
 Disallow: /rechnung-bezahlen.php
+Disallow: /termin-bezahlen.php
 Disallow: /payment-webhook.php
 Disallow: /payment-erfolg.php
 

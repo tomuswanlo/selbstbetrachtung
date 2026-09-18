@@ -114,6 +114,12 @@ final class Booking
         self::ensureColumn($pdo, 'bookings', 'payment_provider', 'TEXT');
         self::ensureColumn($pdo, 'bookings', 'payment_reference', 'TEXT');
         self::ensureColumn($pdo, 'bookings', 'package_id', 'INTEGER');
+        // Zweiter Bearer-Token neben cancel_token: erlaubt einen eigenen "Termin
+        // bezahlen"-Link (termin-bezahlen.php), der NACH der eigentlichen Buchung
+        // ganz ohne erneute Turnstile-Prüfung aufgerufen werden kann – der Token
+        // selbst ist die Berechtigung, exakt wie bei cancel_token/payment_token
+        // auf Rechnungen (siehe rechnung-bezahlen.php).
+        self::ensureColumn($pdo, 'bookings', 'payment_token', 'TEXT');
 
         // Einmaliges Nachrüsten: bereits bestehende, zusammenhängende Einträge ohne
         // group_id (aus der Zeit vor dieser Funktion) rückwirkend zu Gruppen zusammenfassen.
@@ -432,9 +438,10 @@ final class Booking
             }
 
             $token = bin2hex(random_bytes(24));
+            $paymentToken = bin2hex(random_bytes(24));
             $stmt = $pdo->prepare('
-                INSERT INTO bookings (date, start_time, end_time, type, name, email, phone, message, status, cancel_token, created_at)
-                VALUES (:date, :start_time, :end_time, :type, :name, :email, :phone, :message, \'confirmed\', :token, :created_at)
+                INSERT INTO bookings (date, start_time, end_time, type, name, email, phone, message, status, cancel_token, payment_token, created_at)
+                VALUES (:date, :start_time, :end_time, :type, :name, :email, :phone, :message, \'confirmed\', :token, :payment_token, :created_at)
             ');
             $stmt->execute([
                 'date' => $date,
@@ -446,6 +453,7 @@ final class Booking
                 'phone' => $data['phone'] ?? null,
                 'message' => $data['message'] ?? null,
                 'token' => $token,
+                'payment_token' => $paymentToken,
                 'created_at' => self::now()->format('Y-m-d H:i:s'),
             ]);
             $id = (int) $pdo->lastInsertId();
@@ -460,6 +468,7 @@ final class Booking
                     'end_time' => $end,
                     'type' => $data['type'],
                     'cancel_token' => $token,
+                    'payment_token' => $paymentToken,
                 ],
             ];
         } catch (Throwable $e) {
@@ -546,6 +555,15 @@ final class Booking
     public static function findByToken(PDO $pdo, string $token): ?array
     {
         $stmt = $pdo->prepare('SELECT * FROM bookings WHERE cancel_token = :token');
+        $stmt->execute(['token' => $token]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    /** Für termin-bezahlen.php: Termin über seinen eigenen Bezahl-Token finden (kein Turnstile nötig, siehe dort). */
+    public static function findByPaymentToken(PDO $pdo, string $token): ?array
+    {
+        $stmt = $pdo->prepare("SELECT * FROM bookings WHERE payment_token = :token AND status = 'confirmed'");
         $stmt->execute(['token' => $token]);
         $row = $stmt->fetch();
         return $row ?: null;

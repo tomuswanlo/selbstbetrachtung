@@ -10,9 +10,6 @@ header('X-Robots-Tag: noindex, nofollow');
 
 require __DIR__ . '/lib/Booking.php';
 require __DIR__ . '/lib/Buchhaltung.php';
-require __DIR__ . '/lib/Pakete.php';
-require __DIR__ . '/lib/Vertrag.php';
-require __DIR__ . '/lib/Payments.php';
 
 function respond(array $data, int $code = 200): void
 {
@@ -125,16 +122,6 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $phone = field('phone');
     $message = field('message');
     $consent = field('consent') !== '';
-    // Online-Zahlung/Paket-Einlösung gibt es nur beim Folgetermin (60 Min., 70 €) –
-    // beim kostenlosen Kurz-Erstgespräch ergibt beides keinen Sinn, deshalb hier
-    // unabhängig vom Formularinhalt serverseitig erzwungen (defense in depth,
-    // die UI blendet die Auswahl für 'erstgespraech' ohnehin schon aus).
-    $paymentMethod = $type === 'folgetermin' ? field('payment_method') : '';
-    if (!in_array($paymentMethod, ['online', 'package'], true)) {
-        $paymentMethod = 'none';
-    }
-    $packageCode = field('package_code');
-    $provider = field('provider');
 
     $errors = [];
     if (!isset(Booking::TYPES[$type])) {
@@ -155,29 +142,8 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$consent) {
         $errors[] = 'consent';
     }
-    if ($paymentMethod === 'online' && !in_array($provider, ['stripe', 'paypal'], true)) {
-        $errors[] = 'provider';
-    }
-    if ($paymentMethod === 'package' && $packageCode === '') {
-        $errors[] = 'package_code';
-    }
     if ($errors) {
         respond(['ok' => false, 'error' => 'Bitte füllen Sie die markierten Felder aus.', 'fields' => $errors], 422);
-    }
-
-    $buchhaltungPdo = Buchhaltung::db();
-
-    // Paket-Code vorab prüfen (VOR dem Anlegen der Buchung), damit bei einem
-    // ungültigen/leeren Restguthaben kein Termin-Slot für nichts belegt wird.
-    $package = null;
-    if ($paymentMethod === 'package') {
-        $package = Pakete::findByToken($buchhaltungPdo, $packageCode);
-        if ($package === null) {
-            respond(['ok' => false, 'error' => 'Dieser Paket-Code ist unbekannt oder das Paket ist noch nicht bezahlt.', 'fields' => ['package_code']], 422);
-        }
-        if (Pakete::hoursRemaining($buchhaltungPdo, $package) < 0.999) {
-            respond(['ok' => false, 'error' => 'Auf diesem Paket ist keine Stunde mehr übrig.', 'fields' => ['package_code']], 422);
-        }
     }
 
     $result = Booking::createBooking($pdo, [
@@ -199,51 +165,18 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $dateFormatted = (new DateTimeImmutable($date))->format('d.m.Y');
     $cancelUrl = baseUrl() . '/termin-absagen.php?token=' . urlencode($booking['cancel_token']);
 
-    // --- Online-Zahlung: Checkout starten, Buchung bleibt bis zur Webhook-
-    // Bestätigung auf 'pending' stehen; die Bestätigungsmails verschickt in
-    // diesem Fall payment-webhook.php, nicht dieser Codepfad. ---------------
-    if ($paymentMethod === 'online') {
-        Vertrag::recordConsent($buchhaltungPdo, 'session', $booking['id'], [
-            'name' => $name, 'address' => null, 'email' => $email, 'phone' => $phone !== '' ? $phone : null, 'geburtsdatum' => null,
-        ]);
-        // Denselben Honorarsatz verwenden, den die Praxis in den Buchhaltungs-
-        // Einstellungen pflegt (Buchhaltung::allSettings()), statt einen zweiten,
-        // separat zu pflegenden Preis im Code zu hinterlegen.
-        $settings = Buchhaltung::allSettings($buchhaltungPdo);
+    // Der Termin ist ab hier in jedem Fall gebucht und wird per E-Mail bestätigt –
+    // unabhängig davon, ob/wie später bezahlt wird. Bezahlen ist bewusst ein
+    // eigener, zweiter Schritt (siehe termin-bezahlen.php), der über den mit der
+    // Buchung erzeugten payment_token läuft statt über eine erneute Turnstile-
+    // Prüfung in diesem Formular-Submit.
+    $payUrl = null;
+    $sessionPriceLabel = null;
+    if ($type === 'folgetermin') {
+        $payUrl = baseUrl() . '/termin-bezahlen.php?token=' . urlencode($booking['payment_token']);
+        $settings = Buchhaltung::allSettings(Buchhaltung::db());
         $sessionPriceCents = (int) ($settings['price_folgetermin_cents'] ?: 7000);
-
-        $description = 'Folgetermin (60 Min.) – Selbstbetrachtung';
-        $successUrl = baseUrl() . '/payment-erfolg.php?provider=' . $provider . '&kind=session&ref=' . $booking['id'] . '&session_id={CHECKOUT_SESSION_ID}';
-        $cancelUrl2 = baseUrl() . '/termin.php';
-
-        if ($provider === 'stripe') {
-            $configFile = __DIR__ . '/stripe_config.php';
-            if (!file_exists($configFile)) {
-                respond(['ok' => false, 'error' => 'Online-Zahlung ist derzeit nicht verfügbar.'], 500);
-            }
-            require $configFile;
-            $payResult = Payments::createStripeCheckoutSession($sessionPriceCents, $description, $successUrl, $cancelUrl2, ['kind' => 'session', 'reference_id' => (string) $booking['id']], $email);
-        } else {
-            $configFile = __DIR__ . '/paypal_config.php';
-            if (!file_exists($configFile)) {
-                respond(['ok' => false, 'error' => 'Online-Zahlung ist derzeit nicht verfügbar.'], 500);
-            }
-            require $configFile;
-            $returnUrl = baseUrl() . '/payment-erfolg.php?provider=paypal&kind=session&ref=' . $booking['id'];
-            $payResult = Payments::createPaypalOrder($sessionPriceCents, $description, $returnUrl, $cancelUrl2, 'session:' . $booking['id']);
-        }
-
-        if (!$payResult['ok']) {
-            respond(['ok' => false, 'error' => $payResult['error'] ?? 'Die Zahlung konnte nicht gestartet werden.'], 502);
-        }
-        Booking::markSessionPending($pdo, $booking['id'], $provider, $payResult['session_id'] ?? $payResult['order_id']);
-        respond(['ok' => true, 'redirect_url' => $payResult['url']]);
-    }
-
-    // --- Mit Paket-Stunde bezahlt: sofort verrechnen, Termin ist bereits bezahlt ---
-    if ($paymentMethod === 'package' && $package !== null) {
-        Booking::markSessionUsingPackage($pdo, $booking['id'], (int) $package['id']);
-        Pakete::logUsage($buchhaltungPdo, (int) $package['id'], 1.0, (string) $booking['id'], 'Termin am ' . $dateFormatted . ', ' . $startTime . ' Uhr');
+        $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
     }
 
     require __DIR__ . '/lib/PHPMailer/src/Exception.php';
@@ -307,11 +240,20 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $confirm->addAddress($email, $name);
 
         $confirm->Subject = "Terminbestätigung: {$typeLabel} am {$dateFormatted}, {$startTime} Uhr";
+        $paymentBlock = '';
+        if ($payUrl !== null) {
+            $paymentBlock =
+                "Honorar: {$sessionPriceLabel}\n" .
+                "Sie können bequem online bezahlen (Kreditkarte, SEPA-Lastschrift oder PayPal):\n" .
+                "{$payUrl}\n\n" .
+                "Barzahlung oder Zahlung auf Rechnung vor Ort ist nur nach vorheriger Absprache möglich.\n\n";
+        }
         $confirm->Body =
             "Liebe/r {$name},\n\n" .
             "Ihr Termin ist bestätigt:\n\n" .
             "{$typeLabel}\n" .
             "{$dateFormatted}, {$startTime}–{$booking['end_time']} Uhr\n\n" .
+            $paymentBlock .
             "Sollten Sie den Termin nicht wahrnehmen können, sagen Sie ihn bitte hier ab:\n" .
             "{$cancelUrl}\n\n" .
             "Sollte kurzfristig doch etwas dazwischenkommen oder Sie möchten sonst etwas absprechen, " .
@@ -332,8 +274,11 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             'date_formatted' => $dateFormatted,
             'start_time' => $startTime,
             'end_time' => $booking['end_time'],
+            'type' => $type,
             'type_label' => $typeLabel,
             'cancel_url' => $cancelUrl,
+            'pay_url' => $payUrl,
+            'price_label' => $sessionPriceLabel,
         ],
     ]);
 }

@@ -132,10 +132,13 @@ final class Payments
     private static function stripeRequest(string $method, string $path, array $formParams): array
     {
         $ch = curl_init('https://api.stripe.com' . $path);
+        // trim(): schützt gegen unsichtbare Leerzeichen/Zeilenumbrüche, die beim manuellen
+        // Einfügen des Keys in stripe_config.php (z.B. über den Plesk-Datei-Editor) leicht
+        // mitkopiert werden und Stripe sonst mit "Invalid API Key provided" quittiert.
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
-            CURLOPT_USERPWD => STRIPE_SECRET_KEY . ':',
+            CURLOPT_USERPWD => trim(STRIPE_SECRET_KEY) . ':',
             CURLOPT_CUSTOMREQUEST => $method,
         ];
         if ($method === 'POST') {
@@ -188,7 +191,7 @@ final class Payments
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
-            CURLOPT_USERPWD => PAYPAL_CLIENT_ID . ':' . PAYPAL_CLIENT_SECRET,
+            CURLOPT_USERPWD => trim(PAYPAL_CLIENT_ID) . ':' . trim(PAYPAL_CLIENT_SECRET),
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => 'grant_type=client_credentials',
         ]);
@@ -237,6 +240,7 @@ final class Payments
                 'brand_name' => 'Selbstbetrachtung',
                 'locale' => 'de-DE',
                 'user_action' => 'PAY_NOW',
+                'shipping_preference' => 'NO_SHIPPING', // Dienstleistung, kein Versand
                 'return_url' => $returnUrl,
                 'cancel_url' => $cancelUrl,
             ],

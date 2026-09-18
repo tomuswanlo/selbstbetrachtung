@@ -495,6 +495,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
   .badge--paid{ background:var(--green); }
   .badge--cancelled{ background:var(--danger); color:#fff; }
   .badge--overdue{ background:var(--danger); color:#fff; }
+  .in-invoice{ background:rgba(214,162,106,.25); }
   .quicknav{ margin:0 0 .9rem; font-size:.85rem; }
   .quicknav a{ color:var(--ink-mute); }
   .summary-cards{ display:flex; gap:.7rem; flex-wrap:wrap; margin-bottom:.8rem; }
@@ -663,8 +664,9 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
         <thead><tr><th></th><th>Datum</th><th>Zeit</th><th>Art</th><th>Klient*in</th></tr></thead>
         <tbody>
         <?php foreach (array_slice($invoicableBookings, 0, 20) as $b): ?>
-          <tr>
-            <td><input type="checkbox" name="from_booking[]" value="<?= (int) $b['id'] ?>"></td>
+          <?php $isPending = in_array((int) $b['id'], $fromBookingIds, true); ?>
+          <tr class="<?= $isPending ? 'in-invoice' : '' ?>">
+            <td><input type="checkbox" name="from_booking[]" value="<?= (int) $b['id'] ?>" <?= $isPending ? 'checked' : '' ?> onchange="this.closest('tr').classList.toggle('in-invoice', this.checked)"></td>
             <td><?= htmlspecialchars((new DateTimeImmutable($b['date']))->format('d.m.Y')) ?></td>
             <td><?= htmlspecialchars($b['start_time']) ?></td>
             <td><?= htmlspecialchars(Booking::TYPES[$b['type']]['label'] ?? $b['type']) ?></td>

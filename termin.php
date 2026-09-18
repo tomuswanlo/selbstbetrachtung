@@ -1,10 +1,4 @@
-<?php
-declare(strict_types=1);
-
-require __DIR__ . '/lib/Buchhaltung.php';
-$sessionPriceCents = (int) (Buchhaltung::allSettings(Buchhaltung::db())['price_folgetermin_cents'] ?: 7000);
-$sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
-?><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -93,19 +87,18 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
   .slot-summary{ background:var(--cream-dark); border-radius:10px; padding:.7rem 1rem; font-weight:600; margin:-.25rem 0 1.25rem; }
   .hp{ position:absolute; left:-9999px; width:1px; height:1px; opacity:0; }
 
-  .payment-choice{ margin-bottom:1.25rem; }
-  .payment-choice .opt{ display:flex; align-items:flex-start; gap:.5rem; padding:.6rem 0; font-weight:600; font-size:.92rem; cursor:pointer; }
-  .payment-choice .opt input{ margin-top:.25rem; }
-  .payment-choice .opt .sub{ display:block; font-weight:400; color:var(--ink-mute); font-size:.85rem; }
-  .payment-detail{ margin:.25rem 0 .75rem 1.6rem; }
-  .payment-detail input[type=text]{ display:block; width:100%; margin-top:.4rem; padding:.6rem .75rem; font-family:inherit; font-size:1rem; border:1.5px solid var(--cream-dark); border-radius:10px; background:#fff; }
-  .vertrag-box{ background:#fff; border:1px solid var(--cream-dark); border-radius:12px; padding:.85rem 1rem; margin:.25rem 0 .75rem 1.6rem; font-size:.85rem; color:var(--ink-mute); max-height:8rem; overflow-y:auto; }
-  .pay-buttons{ display:flex; gap:.6rem; flex-wrap:wrap; margin:.25rem 0 .75rem 1.6rem; }
-  .pay-buttons .btn{ flex:1 1 180px; padding:.7rem 1.1rem; font-size:.92rem; }
-  .btn--stripe{ background:var(--ink); color:#fff; }
-  .btn--stripe:hover{ background:var(--ink-2); }
-  .btn--paypal{ background:#FFC439; color:#003087; }
-  .btn--paypal:hover{ background:#ffb400; }
+  .payment-offer{ margin-top:1.25rem; padding-top:1.25rem; border-top:1px solid var(--cream-dark); }
+  .payment-offer h3{ font-family:var(--font-head); font-weight:600; font-size:1.05rem; margin:0 0 .75rem; }
+  .offer-cards{ display:flex; gap:.75rem; flex-wrap:wrap; margin-bottom:.75rem; }
+  .offer-card{
+    flex:1 1 200px; display:flex; flex-direction:column; gap:.15rem; text-decoration:none; color:var(--ink);
+    background:#fff; border:1.5px solid var(--cream-dark); border-radius:12px; padding:1rem 1.1rem; transition:border-color .15s;
+  }
+  .offer-card:hover{ border-color:var(--gold); }
+  .offer-card .offer-title{ font-weight:700; }
+  .offer-card .offer-price{ font-family:var(--font-head); font-size:1.3rem; font-weight:600; color:var(--gold-dark); }
+  .offer-card .offer-sub{ font-size:.82rem; color:var(--ink-mute); }
+  .payment-offer .hint{ margin:0; }
 
   .btn{
     display:inline-block; border:none; border-radius:999px; padding:.85rem 1.75rem; font-weight:700;
@@ -140,7 +133,7 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
       </label>
       <label>
         <input type="radio" name="type" value="folgetermin">
-        Folgetermin <span class="duration">(60 Min.)</span>
+        Termin/Folgetermin <span class="duration">(60 Min.)</span>
       </label>
     </div>
 
@@ -178,30 +171,6 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
         <textarea name="message" placeholder="Möchten Sie mir vorab etwas mitteilen?"></textarea>
       </label>
 
-      <div class="payment-choice" id="paymentChoice" hidden>
-        <p style="font-weight:600; margin-bottom:.4rem;">Bezahlung</p>
-        <label class="opt">
-          <input type="radio" name="payment_method" value="none" checked>
-          <span>Vor Ort / auf Rechnung<span class="sub">wie bisher, keine Online-Zahlung nötig</span></span>
-        </label>
-        <label class="opt">
-          <input type="radio" name="payment_method" value="online">
-          <span>Jetzt online bezahlen (<?= htmlspecialchars($sessionPriceLabel) ?>)<span class="sub">Kreditkarte, SEPA-Lastschrift oder PayPal</span></span>
-        </label>
-        <div class="payment-detail" id="onlinePayDetail" hidden>
-          <div class="vertrag-box">Mit der Online-Zahlung schließen Sie zugleich den Beratervertrag für diesen Termin ab. Es gelten die <a href="/#agb" target="_blank" rel="noopener">Allgemeinen Geschäftsbedingungen</a> von Selbstbetrachtung (u. a. keine Psychotherapie, 24h-Stornofrist, Schweigepflicht gem. § 203 StGB). Mit Klick auf "Mit Karte/SEPA bezahlen" bzw. "Mit PayPal bezahlen" erklären Sie Ihr rechtsverbindliches Einverständnis in Textform (§ 126b BGB).</div>
-        </div>
-        <label class="opt">
-          <input type="radio" name="payment_method" value="package">
-          <span>Mit Paket-Code bezahlen<span class="sub">wenn Sie bereits ein 5-Stunden-Paket gekauft haben</span></span>
-        </label>
-        <div class="payment-detail" id="packageDetail" hidden>
-          <label style="margin-bottom:0;">Paket-Code (aus Ihrer Kauf-Bestätigung)
-            <input type="text" name="package_code" autocomplete="off">
-          </label>
-        </div>
-      </div>
-
       <label class="consent">
         <input type="checkbox" name="consent" required>
         <span>Ich habe die <a href="/#datenschutz" target="_blank" rel="noopener">Datenschutzerklärung</a> gelesen und bin mit der Verarbeitung meiner Daten zur Terminvereinbarung einverstanden.*</span>
@@ -215,18 +184,30 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
 
       <div class="cf-turnstile" data-sitekey="0x4AAAAAAES154ac2rM_sCUb" data-theme="light" style="margin-bottom:1rem;"></div>
 
-      <button type="submit" class="btn btn--primary" id="submitBtn" data-provider="">Termin verbindlich buchen</button>
-      <div class="pay-buttons" id="onlinePayButtons" hidden>
-        <button type="submit" class="btn btn--stripe" id="stripeBtn" data-provider="stripe">Mit Karte/SEPA bezahlen</button>
-        <button type="submit" class="btn btn--paypal" id="paypalBtn" data-provider="paypal">Mit PayPal bezahlen</button>
-      </div>
+      <button type="submit" class="btn btn--primary" id="submitBtn">Termin verbindlich buchen</button>
       <p class="form-error" id="formError" hidden></p>
     </form>
 
     <div class="success-card" id="successSection" hidden>
-      <h2>Termin bestätigt ✓</h2>
+      <h2>Termin eingebucht ✓</h2>
       <p id="successDetails"></p>
       <p class="hint">Eine Bestätigung wurde an Ihre E-Mail-Adresse gesendet – dort finden Sie auch den Link zum Absagen, falls Sie den Termin nicht wahrnehmen können.</p>
+      <div class="payment-offer" id="paymentOffer" hidden>
+        <h3>Bezahlung</h3>
+        <div class="offer-cards">
+          <a class="offer-card" id="offerOnline" href="#">
+            <span class="offer-title">Jetzt online bezahlen</span>
+            <span class="offer-price" id="offerPrice"></span>
+            <span class="offer-sub">Kreditkarte, SEPA-Lastschrift oder PayPal</span>
+          </a>
+          <a class="offer-card" href="/paket-kaufen.php">
+            <span class="offer-title">5-Stunden-Paket</span>
+            <span class="offer-price">325,00 €</span>
+            <span class="offer-sub">für mehrere Termine im Voraus</span>
+          </a>
+        </div>
+        <p class="hint">Barzahlung oder Zahlung auf Rechnung vor Ort ist nur nach vorheriger Absprache möglich.</p>
+      </div>
     </div>
   </main>
 
@@ -260,29 +241,11 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
     var successDetails = document.getElementById('successDetails');
     var formError = document.getElementById('formError');
     var submitBtn = document.getElementById('submitBtn');
-    var paymentChoice = document.getElementById('paymentChoice');
-    var onlinePayDetail = document.getElementById('onlinePayDetail');
-    var packageDetail = document.getElementById('packageDetail');
-    var onlinePayButtons = document.getElementById('onlinePayButtons');
-    var stripeBtn = document.getElementById('stripeBtn');
-    var paypalBtn = document.getElementById('paypalBtn');
-    var chosenProvider = '';
+    var paymentOffer = document.getElementById('paymentOffer');
+    var offerOnline = document.getElementById('offerOnline');
+    var offerPrice = document.getElementById('offerPrice');
 
     document.getElementById('tsField').value = String(Date.now());
-
-    function updatePaymentUI(){
-      var checked = paymentChoice.querySelector('input[name=payment_method]:checked');
-      var method = checked ? checked.value : 'none';
-      onlinePayDetail.hidden = method !== 'online';
-      packageDetail.hidden = method !== 'package';
-      onlinePayButtons.hidden = method !== 'online';
-      submitBtn.hidden = method === 'online';
-    }
-    paymentChoice.addEventListener('change', updatePaymentUI);
-    [stripeBtn, paypalBtn].forEach(function(btn){
-      btn.addEventListener('click', function(){ chosenProvider = btn.getAttribute('data-provider'); });
-    });
-    submitBtn.addEventListener('click', function(){ chosenProvider = ''; });
 
     // Telefonnummer erst im Browser aus Zeichencodes zusammensetzen (wie auf der übrigen
     // Website), damit sie nicht im HTML-Quelltext für einfache Scraper auslesbar ist.
@@ -428,39 +391,35 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
       document.getElementById('typeField').value = selectedType;
       bookingForm.hidden = false;
       formError.hidden = true;
-      paymentChoice.hidden = selectedType !== 'folgetermin';
-      if (selectedType !== 'folgetermin') {
-        paymentChoice.querySelector('input[value=none]').checked = true;
-      }
-      updatePaymentUI();
       bookingForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     bookingForm.addEventListener('submit', function(e){
       e.preventDefault();
       formError.hidden = true;
-      submitBtn.disabled = true; stripeBtn.disabled = true; paypalBtn.disabled = true;
-      var busyBtn = chosenProvider === 'paypal' ? paypalBtn : (chosenProvider === 'stripe' ? stripeBtn : submitBtn);
-      var originalLabel = busyBtn.textContent;
-      busyBtn.textContent = chosenProvider ? 'Wird vorbereitet…' : 'Wird gebucht…';
+      submitBtn.disabled = true;
+      var originalLabel = submitBtn.textContent;
+      submitBtn.textContent = 'Wird gebucht…';
 
       var fd = new FormData(bookingForm);
       fd.append('action', 'book');
-      if (chosenProvider) { fd.append('provider', chosenProvider); }
 
       fetch('/termin-api.php', { method: 'POST', body: fd })
         .then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
         .then(function(res){
           var data = res.data;
-          if (data.ok && data.redirect_url) {
-            window.location.href = data.redirect_url;
-            return;
-          }
           if (data.ok) {
             bookingForm.hidden = true;
             slotsSection.hidden = true;
             successSection.hidden = false;
             successDetails.textContent = data.booking.type_label + ' am ' + data.booking.date_formatted + ' um ' + data.booking.start_time + ' Uhr';
+            if (data.booking.type === 'folgetermin' && data.booking.pay_url) {
+              offerOnline.href = data.booking.pay_url;
+              offerPrice.textContent = data.booking.price_label || '';
+              paymentOffer.hidden = false;
+            } else {
+              paymentOffer.hidden = true;
+            }
             successSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
           } else {
             if (data.conflict) {
@@ -481,8 +440,8 @@ $sessionPriceLabel = Buchhaltung::formatEuro($sessionPriceCents);
           if (window.turnstile) { window.turnstile.reset(); }
         })
         .finally(function(){
-          submitBtn.disabled = false; stripeBtn.disabled = false; paypalBtn.disabled = false;
-          busyBtn.textContent = originalLabel;
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
         });
     });
 
