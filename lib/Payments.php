@@ -127,6 +127,15 @@ final class Payments
                 return true;
             }
         }
+        // TEMPORÄR zur Fehlersuche (kein Secret im Klartext geloggt, nur Längen/Hashes/
+        // die berechnete erwartete Signatur) – nach der Diagnose wieder entfernen.
+        error_log('Stripe-Webhook-Diagnose: rawBody_len=' . strlen($rawBody)
+            . ' rawBody_sha256=' . hash('sha256', $rawBody)
+            . ' secret_len=' . strlen(trim(STRIPE_WEBHOOK_SECRET))
+            . ' secret_sha256=' . hash('sha256', trim(STRIPE_WEBHOOK_SECRET))
+            . ' timestamp=' . $timestamp
+            . ' received_sig=' . implode(',', $signatures)
+            . ' expected_sig=' . $expected);
         return false;
     }
 
