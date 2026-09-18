@@ -7,6 +7,7 @@ session_start();
 require __DIR__ . '/lib/Booking.php';
 require __DIR__ . '/lib/Buchhaltung.php';
 require __DIR__ . '/lib/Pakete.php';
+require __DIR__ . '/lib/Notifications.php';
 
 $configFile = __DIR__ . '/termin_admin_config.php';
 if (!file_exists($configFile)) {
@@ -388,6 +389,18 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
 
     if ($do === 'delete_package_usage') {
         Pakete::deleteUsageLogEntry($pdo, (int) ($_POST['log_id'] ?? 0));
+        redirectBack('#pakete');
+    }
+
+    if ($do === 'resend_package_mail') {
+        $packageId = (int) ($_POST['package_id'] ?? 0);
+        $pkg = Pakete::findById($pdo, $packageId);
+        if ($pkg && $pkg['status'] === 'bezahlt') {
+            sendPackagePaidConfirmation($packageId);
+            $_SESSION['flash_success'] = 'Paket-Code wurde erneut an ' . $pkg['client_email'] . ' verschickt.';
+        } else {
+            $_SESSION['flash_error'] = 'Paket nicht gefunden oder noch nicht bezahlt.';
+        }
         redirectBack('#pakete');
     }
 }
@@ -775,7 +788,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
     <h2>Pakete</h2>
     <p class="muted">5-Stunden-Pakete, online gekauft über <a href="/paket-kaufen.php" target="_blank" rel="noopener">paket-kaufen.php</a>. Bezahlte Pakete erzeugen automatisch eine Rechnung (siehe „Rechnungen“ oben). Restguthaben wird bei jeder Terminbuchung mit Paket-Code automatisch abgezogen; Sitzungen, die nicht über die Website gebucht wurden, können hier manuell verrechnet werden.</p>
     <table>
-      <thead><tr><th>Käufer*in</th><th>Status</th><th>Gekauft am</th><th>Restguthaben</th><th></th></tr></thead>
+      <thead><tr><th>Käufer*in</th><th>Status</th><th>Gekauft am</th><th>Restguthaben</th><th>Code</th><th></th></tr></thead>
       <tbody>
       <?php foreach ($packages as $pkg): ?>
         <tr>
@@ -789,6 +802,19 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
             <?php if ($pkg['status'] === 'bezahlt'): ?>
               <div class="progress"><span style="width:<?= (float) $pkg['hours_total'] > 0 ? min(100, ($pkg['hours_used'] / (float) $pkg['hours_total']) * 100) : 0 ?>%"></span></div>
               <span class="pkg-hours"><?= htmlspecialchars(rtrim(rtrim(number_format($pkg['hours_remaining'], 1, ',', ''), '0'), ',')) ?> von <?= (int) $pkg['hours_total'] ?> Std. übrig</span>
+            <?php else: ?>
+              <span class="muted">–</span>
+            <?php endif; ?>
+          </td>
+          <td>
+            <?php if ($pkg['status'] === 'bezahlt'): ?>
+              <code style="font-size:.72rem; word-break:break-all;"><?= htmlspecialchars((string) $pkg['purchase_token']) ?></code>
+              <form method="post" style="margin:.25rem 0 0;">
+                <input type="hidden" name="do" value="resend_package_mail">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+                <input type="hidden" name="package_id" value="<?= (int) $pkg['id'] ?>">
+                <button type="submit" class="btn btn--ghost" style="padding:.15rem .5rem; font-size:.72rem;">Mail erneut senden</button>
+              </form>
             <?php else: ?>
               <span class="muted">–</span>
             <?php endif; ?>
@@ -827,7 +853,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
           </td>
         </tr>
       <?php endforeach; ?>
-      <?php if (!$packages): ?><tr><td colspan="5" class="muted">Noch keine Pakete gekauft.</td></tr><?php endif; ?>
+      <?php if (!$packages): ?><tr><td colspan="6" class="muted">Noch keine Pakete gekauft.</td></tr><?php endif; ?>
       </tbody>
     </table>
   </section>
