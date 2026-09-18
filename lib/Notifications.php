@@ -274,3 +274,70 @@ function sendPackageRedeemedConfirmation(int $bookingId, int $packageId): void
         error_log('Praxis-Benachrichtigung (Paket-Einlösung) fehlgeschlagen: ' . $e->getMessage());
     }
 }
+
+/**
+ * Informiert den/die Klient*in, wenn DIE PRAXIS (nicht der Klient selbst) einen
+ * bezahlten Termin storniert hat – termin-admin.php benachrichtigt sonst niemanden
+ * automatisch (siehe Hinweistext dort), aber bei einer Zahlung gibt es jetzt eine
+ * echte Konsequenz (Rückbuchung/Erstattung offen/verfällt), die mitgeteilt werden
+ * sollte. $paymentStatusAfterCancel ist der Rückgabewert von Booking::cancelById()
+ * NACH der Stornierung, entscheidet also direkt den Mailtext.
+ */
+function sendAdminCancellationNotice(int $bookingId, string $paymentStatusAfterCancel): void
+{
+    require_once __DIR__ . '/Booking.php';
+    $pdo = Booking::db();
+    $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = :id');
+    $stmt->execute(['id' => $bookingId]);
+    $booking = $stmt->fetch();
+    if (!$booking || !$booking['email']) {
+        return;
+    }
+
+    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    if (!file_exists($smtpConfigFile)) {
+        return;
+    }
+    require_once $smtpConfigFile;
+    require_once __DIR__ . '/PHPMailer/src/Exception.php';
+    require_once __DIR__ . '/PHPMailer/src/PHPMailer.php';
+    require_once __DIR__ . '/PHPMailer/src/SMTP.php';
+
+    $typeLabel = Booking::TYPES[$booking['type']]['label'] ?? $booking['type'];
+    $dateFormatted = (new DateTimeImmutable($booking['date']))->format('d.m.Y');
+
+    $refundNote = match ($paymentStatusAfterCancel) {
+        'refunded' => 'Ihre Paketstunde wurde Ihnen gutgeschrieben.',
+        'refund_pending' => 'Ihre Online-Zahlung wird zeitnah erstattet.',
+        default => 'Da die Absage weniger als ' . Booking::REFUND_LEAD_HOURS . ' Stunden vor dem Termin erfolgt, verfällt die Zahlung bzw. Paketstunde gemäß unserer AGB.',
+    };
+
+    try {
+        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = SMTP_USER;
+        $mail->Password = SMTP_PASS;
+        $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $mail->Port = SMTP_PORT;
+        $mail->CharSet = 'UTF-8';
+        $mail->setFrom(SMTP_USER, 'Gabriele Küppers – Selbstbetrachtung');
+        $mail->addAddress($booking['email'], $booking['name']);
+        $mail->Subject = "Terminabsage: {$typeLabel} am {$dateFormatted}, {$booking['start_time']} Uhr";
+        $mail->Body =
+            "Liebe/r {$booking['name']},\n\n" .
+            "Ihr Termin wurde von uns storniert:\n\n" .
+            "{$typeLabel}\n" .
+            "{$dateFormatted}, {$booking['start_time']}–{$booking['end_time']} Uhr\n\n" .
+            "{$refundNote}\n\n" .
+            "Bei Fragen erreichen Sie uns über das Kontaktformular (" . baseUrl() . "/#kontakt) " .
+            "oder telefonisch unter +49 151 4135 7281.\n\n" .
+            "Diese Mail wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
+            "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
+            "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n";
+        $mail->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Admin-Storno-Benachrichtigung an Klient*in fehlgeschlagen: ' . $e->getMessage());
+    }
+}

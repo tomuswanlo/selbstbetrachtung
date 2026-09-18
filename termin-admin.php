@@ -5,6 +5,7 @@ date_default_timezone_set('Europe/Berlin');
 session_start();
 
 require __DIR__ . '/lib/Booking.php';
+require __DIR__ . '/lib/Notifications.php';
 
 $configFile = __DIR__ . '/termin_admin_config.php';
 if (!file_exists($configFile)) {
@@ -141,7 +142,11 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     }
 
     if ($do === 'cancel_booking') {
-        Booking::cancelById($pdo, (int) ($_POST['id'] ?? 0), 'admin');
+        $bookingId = (int) ($_POST['id'] ?? 0);
+        $result = Booking::cancelById($pdo, $bookingId, 'admin');
+        if ($result['ok'] && in_array($result['booking']['payment_status'], ['paid', 'package', 'refunded', 'refund_pending'], true)) {
+            sendAdminCancellationNotice($bookingId, $result['booking']['payment_status']);
+        }
         redirectBack();
     }
 
