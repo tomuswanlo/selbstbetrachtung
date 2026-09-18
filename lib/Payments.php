@@ -22,6 +22,19 @@ declare(strict_types=1);
  */
 final class Payments
 {
+    /**
+     * Bereinigt einen aus *_config.php gelesenen API-Schlüssel/Secret von allem, was
+     * beim manuellen Copy-Paste in den Plesk-Datei-Editor mitkommen kann (Leerzeichen,
+     * Zeilenumbrüche, aber auch unsichtbare Unicode-Zeichen wie Zero-Width-Spaces, die
+     * trim() nicht erfasst). Stripe-/PayPal-Schlüssel bestehen ausschließlich aus
+     * Buchstaben, Ziffern, „_" und „-", daher wird hier hart auf dieses Zeichenset
+     * gefiltert statt nur die Ränder zu trimmen.
+     */
+    private static function cleanSecret(string $s): string
+    {
+        return preg_replace('/[^A-Za-z0-9_-]/', '', $s) ?? '';
+    }
+
     // ------------------------------------------------------------------
     // Stripe
     // ------------------------------------------------------------------
@@ -119,23 +132,12 @@ final class Payments
         if (abs(time() - (int) $timestamp) > 300) {
             return false;
         }
-        // trim(): gleicher Grund wie bei STRIPE_SECRET_KEY in stripeRequest() – schützt
-        // vor unsichtbaren Zeichen aus manuellem Copy-Paste in stripe_config.php.
-        $expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, trim(STRIPE_WEBHOOK_SECRET));
+        $expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, self::cleanSecret(STRIPE_WEBHOOK_SECRET));
         foreach ($signatures as $sig) {
             if (hash_equals($expected, $sig)) {
                 return true;
             }
         }
-        // TEMPORÄR zur Fehlersuche (kein Secret im Klartext geloggt, nur Längen/Hashes/
-        // die berechnete erwartete Signatur) – nach der Diagnose wieder entfernen.
-        error_log('Stripe-Webhook-Diagnose: rawBody_len=' . strlen($rawBody)
-            . ' rawBody_sha256=' . hash('sha256', $rawBody)
-            . ' secret_len=' . strlen(trim(STRIPE_WEBHOOK_SECRET))
-            . ' secret_sha256=' . hash('sha256', trim(STRIPE_WEBHOOK_SECRET))
-            . ' timestamp=' . $timestamp
-            . ' received_sig=' . implode(',', $signatures)
-            . ' expected_sig=' . $expected);
         return false;
     }
 
@@ -149,7 +151,7 @@ final class Payments
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
-            CURLOPT_USERPWD => trim(STRIPE_SECRET_KEY) . ':',
+            CURLOPT_USERPWD => self::cleanSecret(STRIPE_SECRET_KEY) . ':',
             CURLOPT_CUSTOMREQUEST => $method,
         ];
         if ($method === 'POST') {
@@ -202,7 +204,7 @@ final class Payments
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
-            CURLOPT_USERPWD => trim(PAYPAL_CLIENT_ID) . ':' . trim(PAYPAL_CLIENT_SECRET),
+            CURLOPT_USERPWD => self::cleanSecret(PAYPAL_CLIENT_ID) . ':' . self::cleanSecret(PAYPAL_CLIENT_SECRET),
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => 'grant_type=client_credentials',
         ]);
@@ -334,7 +336,7 @@ final class Payments
             'transmission_id' => $headers['paypal-transmission-id'] ?? '',
             'transmission_sig' => $headers['paypal-transmission-sig'] ?? '',
             'transmission_time' => $headers['paypal-transmission-time'] ?? '',
-            'webhook_id' => trim(PAYPAL_WEBHOOK_ID),
+            'webhook_id' => self::cleanSecret(PAYPAL_WEBHOOK_ID),
             'webhook_event' => $eventBody,
         ];
         $result = self::paypalRequest('POST', '/v1/notifications/verify-webhook-signature', $auth['token'], $payload);
