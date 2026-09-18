@@ -105,6 +105,32 @@ final class Buchhaltung
             )
         ');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)');
+
+        // Online-Zahlung (siehe lib/Payments.php): pro Rechnung einzeln von der
+        // Praxis freigeben, nicht automatisch für alle offenen Rechnungen aktiv.
+        self::ensureColumn($pdo, 'invoices', 'online_payment_enabled', "INTEGER NOT NULL DEFAULT 0");
+        self::ensureColumn($pdo, 'invoices', 'payment_token', 'TEXT');
+        self::ensureColumn($pdo, 'invoices', 'payment_provider', 'TEXT');
+        self::ensureColumn($pdo, 'invoices', 'payment_reference', 'TEXT');
+
+        // Pakete + Vertrags-Zustimmungen leben in derselben Datenbank (siehe deren
+        // Klassenkommentare) – hier mit initialisieren, damit jede Codestelle, die
+        // Buchhaltung::db() öffnet, ein vollständiges Schema vorfindet.
+        require_once __DIR__ . '/Pakete.php';
+        require_once __DIR__ . '/Vertrag.php';
+        Pakete::ensureSchema($pdo);
+        Vertrag::ensureSchema($pdo);
+    }
+
+    private static function ensureColumn(PDO $pdo, string $table, string $column, string $type): void
+    {
+        $cols = $pdo->query("PRAGMA table_info($table)")->fetchAll();
+        foreach ($cols as $c) {
+            if ($c['name'] === $column) {
+                return;
+            }
+        }
+        $pdo->exec("ALTER TABLE $table ADD COLUMN $column $type");
     }
 
     /**
@@ -391,6 +417,36 @@ final class Buchhaltung
             $stmt = $pdo->prepare('UPDATE invoices SET status = :s, updated_at = :u WHERE id = :id');
             $stmt->execute(['s' => $status, 'u' => $now, 'id' => $id]);
         }
+    }
+
+    /**
+     * Gibt eine Rechnung für die Online-Zahlung frei (oder sperrt sie wieder).
+     * Vergibt beim ersten Freigeben einen zufälligen payment_token, der Teil des
+     * an den Klienten geschickten Zahl-Links wird (rechnung-bezahlen.php?token=...) –
+     * die Rechnungs-ID allein reicht nicht, da sie fortlaufend/erratbar ist.
+     */
+    public static function setOnlinePaymentEnabled(PDO $pdo, int $id, bool $enabled): void
+    {
+        if ($enabled) {
+            $stmt = $pdo->prepare('SELECT payment_token FROM invoices WHERE id = :id');
+            $stmt->execute(['id' => $id]);
+            $token = $stmt->fetchColumn();
+            if (!$token) {
+                $token = bin2hex(random_bytes(24));
+                $upd = $pdo->prepare('UPDATE invoices SET payment_token = :t WHERE id = :id');
+                $upd->execute(['t' => $token, 'id' => $id]);
+            }
+        }
+        $stmt = $pdo->prepare('UPDATE invoices SET online_payment_enabled = :e, updated_at = :u WHERE id = :id');
+        $stmt->execute(['e' => $enabled ? 1 : 0, 'u' => self::now()->format('Y-m-d H:i:s'), 'id' => $id]);
+    }
+
+    public static function findInvoiceByPaymentToken(PDO $pdo, string $token): ?array
+    {
+        $stmt = $pdo->prepare("SELECT * FROM invoices WHERE payment_token = :t AND online_payment_enabled = 1 AND status = 'offen'");
+        $stmt->execute(['t' => $token]);
+        $row = $stmt->fetch();
+        return $row ?: null;
     }
 
     public static function findInvoice(PDO $pdo, int $id): ?array

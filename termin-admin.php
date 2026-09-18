@@ -325,7 +325,18 @@ if (isset($_GET['edit_block'])) {
         <tr>
           <td><?= htmlspecialchars((new DateTimeImmutable($u['date']))->format('d.m.Y')) ?></td>
           <td><?= htmlspecialchars($u['start_time']) ?>–<?= htmlspecialchars($u['end_time']) ?></td>
-          <td><?= htmlspecialchars(Booking::TYPES[$u['type']]['label'] ?? $u['type']) ?></td>
+          <td>
+            <?= htmlspecialchars(Booking::TYPES[$u['type']]['label'] ?? $u['type']) ?>
+            <?php
+              $payStatus = $u['payment_status'] ?? 'none';
+              $payBadge = [
+                  'paid' => ['bezahlt (' . ($u['payment_provider'] === 'paypal' ? 'PayPal' : 'Karte/SEPA') . ')', 'var(--green)'],
+                  'pending' => ['Zahlung ausstehend', '#f0c96a'],
+                  'package' => ['Paketstunde', 'var(--gold)'],
+              ][$payStatus] ?? null;
+            ?>
+            <?php if ($payBadge): ?><br><span class="badge" style="background:<?= $payBadge[1] ?>; color:#fff;"><?= htmlspecialchars($payBadge[0]) ?></span><?php endif; ?>
+          </td>
           <td>
             <?= htmlspecialchars($u['name']) ?>
             <?php if ($u['email']): ?><br><span class="muted"><?= htmlspecialchars($u['email']) ?><?php if ($u['phone']): ?> · <?= htmlspecialchars($u['phone']) ?><?php endif; ?></span><?php endif; ?>

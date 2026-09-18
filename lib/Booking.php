@@ -105,6 +105,16 @@ final class Booking
         self::ensureColumn($pdo, 'blocked_dates', 'group_id', 'TEXT');
         self::ensureColumn($pdo, 'bookings', 'group_id', 'TEXT');
 
+        // Online-Zahlung (siehe lib/Payments.php): 'none' = wie bisher vor Ort/per
+        // Überweisung, 'pending' = Checkout gestartet aber (noch) nicht bestätigt,
+        // 'paid' = online bezahlt, 'package' = mit einem Pakethstunden-Code verrechnet
+        // statt bezahlt. package_id verweist auf packages in data/buchhaltung.sqlite
+        // (andere Datei, daher kein echter FK, nur als Text/ID gepflegt).
+        self::ensureColumn($pdo, 'bookings', 'payment_status', "TEXT NOT NULL DEFAULT 'none'");
+        self::ensureColumn($pdo, 'bookings', 'payment_provider', 'TEXT');
+        self::ensureColumn($pdo, 'bookings', 'payment_reference', 'TEXT');
+        self::ensureColumn($pdo, 'bookings', 'package_id', 'INTEGER');
+
         // Einmaliges Nachrüsten: bereits bestehende, zusammenhängende Einträge ohne
         // group_id (aus der Zeit vor dieser Funktion) rückwirkend zu Gruppen zusammenfassen.
         self::backfillBlockedDateGroups($pdo);
@@ -456,6 +466,81 @@ final class Booking
             $pdo->exec('ROLLBACK');
             return ['ok' => false, 'error' => 'Die Buchung konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.'];
         }
+    }
+
+    /** Trägt ein, dass für einen Termin gerade ein Online-Zahlvorgang gestartet wurde (Checkout-Redirect steht noch aus). */
+    public static function markSessionPending(PDO $pdo, int $bookingId, string $provider, string $paymentReference): void
+    {
+        $stmt = $pdo->prepare("UPDATE bookings SET payment_status = 'pending', payment_provider = :prov, payment_reference = :ref WHERE id = :id");
+        $stmt->execute(['prov' => $provider, 'ref' => $paymentReference, 'id' => $bookingId]);
+    }
+
+    /**
+     * Markiert einen Termin als online bezahlt und legt automatisch eine bereits
+     * bezahlte Rechnung in der Buchhaltung an. $buchhaltungPdo ist bewusst ein
+     * zweiter, unabhängiger PDO (Buchhaltung::db()) – Termine und Rechnungen
+     * leben in getrennten SQLite-Dateien (siehe Buchhaltung.php-Klassenkommentar),
+     * eine gemeinsame Transaktion über beide Dateien ist technisch nicht möglich.
+     * Das bedingte UPDATE ("WHERE payment_status != 'paid'") dient deshalb
+     * zugleich als Idempotenz-Sperre gegen einen doppelt zugestellten Webhook,
+     * genau wie in Pakete::markPaid().
+     *
+     * @return array{ok:bool, error?:string, already_processed?:bool}
+     */
+    public static function markSessionPaid(PDO $pdo, PDO $buchhaltungPdo, int $bookingId, string $provider, string $paymentReference, int $amountCents): array
+    {
+        $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = :id');
+        $stmt->execute(['id' => $bookingId]);
+        $booking = $stmt->fetch();
+        if (!$booking) {
+            return ['ok' => false, 'error' => 'Termin nicht gefunden.'];
+        }
+
+        $upd = $pdo->prepare("
+            UPDATE bookings SET payment_status = 'paid', payment_provider = :prov, payment_reference = :ref
+            WHERE id = :id AND payment_status != 'paid'
+        ");
+        $upd->execute(['prov' => $provider, 'ref' => $paymentReference, 'id' => $bookingId]);
+        if ($upd->rowCount() === 0) {
+            return ['ok' => true, 'already_processed' => true];
+        }
+
+        require_once __DIR__ . '/Buchhaltung.php';
+        $today = self::now()->format('Y-m-d');
+        $typeLabel = self::TYPES[$booking['type']]['label'] ?? $booking['type'];
+        $invoiceResult = Buchhaltung::createInvoice($buchhaltungPdo, [
+            'client_name' => $booking['name'],
+            'client_address' => null,
+            'client_email' => $booking['email'],
+            'issued_at' => $today,
+            'due_date' => null,
+            'notes' => 'Online bezahlt über ' . ($provider === 'stripe' ? 'Stripe' : 'PayPal') . ' (Terminbuchung, automatisch angelegt).',
+        ], [[
+            'description' => $typeLabel,
+            'detail' => 'Psychologische Beratung / Coaching',
+            'item_date' => $booking['date'],
+            'quantity' => 1,
+            'unit_price_cents' => $amountCents,
+        ]]);
+        if (!$invoiceResult['ok']) {
+            error_log('Booking::markSessionPaid: Termin ' . $bookingId . ' als bezahlt markiert, aber Rechnung konnte nicht angelegt werden: ' . ($invoiceResult['error'] ?? ''));
+            return ['ok' => true];
+        }
+        Buchhaltung::updateInvoiceStatus($buchhaltungPdo, $invoiceResult['id'], 'bezahlt');
+
+        return ['ok' => true];
+    }
+
+    /**
+     * Verrechnet einen Termin mit einer Paketstunde statt einer Zahlung – package_id
+     * und payment_status='package' werden gesetzt, die eigentliche Verbrauchsbuchung
+     * (Restguthaben-Abzug) übernimmt der Aufrufer über Pakete::logUsage(), da die
+     * Restguthaben-Prüfung selbst in der anderen Datenbank (buchhaltung.sqlite) liegt.
+     */
+    public static function markSessionUsingPackage(PDO $pdo, int $bookingId, int $packageId): void
+    {
+        $stmt = $pdo->prepare("UPDATE bookings SET payment_status = 'package', package_id = :pid WHERE id = :id");
+        $stmt->execute(['pid' => $packageId, 'id' => $bookingId]);
     }
 
     public static function findByToken(PDO $pdo, string $token): ?array

@@ -6,6 +6,7 @@ session_start();
 
 require __DIR__ . '/lib/Booking.php';
 require __DIR__ . '/lib/Buchhaltung.php';
+require __DIR__ . '/lib/Pakete.php';
 
 $configFile = __DIR__ . '/termin_admin_config.php';
 if (!file_exists($configFile)) {
@@ -56,6 +57,8 @@ function renderInvoicePrint(array $inv, array $settings): void
     $overdue = $inv['status'] === 'offen' && $inv['due_date'] && $inv['due_date'] < $today;
     $verwendungszweck = $inv['invoice_number'] . ' · ' . $inv['client_name'];
     $hasBank = trim((string) $settings['sender_bank_iban']) !== '';
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    $baseUrl = ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'selbstbetrachtung-online.de');
     ?><!DOCTYPE html>
 <html lang="de">
 <head>
@@ -185,6 +188,14 @@ function renderInvoicePrint(array $inv, array $settings): void
   <div class="totals">
     <div class="total-row grand"><span>Gesamtbetrag (netto)</span><span class="grand-amt"><?= htmlspecialchars(Buchhaltung::formatEuro((int) $inv['amount_cents'])) ?></span></div>
   </div>
+
+  <?php if (!empty($inv['online_payment_enabled']) && $inv['status'] === 'offen' && !empty($inv['payment_token'])): ?>
+  <div class="payment-section">
+    <div class="pay-label">Online bezahlen</div>
+    <p style="font-size:12px; color:var(--ik2); line-height:1.6;">Diese Rechnung kann bequem online per Kreditkarte, SEPA-Lastschrift oder PayPal beglichen werden:<br>
+    <a href="<?= htmlspecialchars($baseUrl . '/rechnung-bezahlen.php?token=' . urlencode($inv['payment_token'])) ?>" style="color:var(--sd); font-weight:600;"><?= htmlspecialchars($baseUrl . '/rechnung-bezahlen.php?token=' . urlencode($inv['payment_token'])) ?></a></p>
+  </div>
+  <?php endif; ?>
 
   <?php if ($hasBank): ?>
   <div class="payment-section">
@@ -354,6 +365,31 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         Buchhaltung::updateInvoiceStatus($pdo, (int) ($_POST['id'] ?? 0), (string) ($_POST['status'] ?? ''));
         redirectBack('#rechnungen');
     }
+
+    if ($do === 'toggle_online_payment') {
+        Buchhaltung::setOnlinePaymentEnabled($pdo, (int) ($_POST['id'] ?? 0), ($_POST['enabled'] ?? '') === '1');
+        redirectBack('#rechnungen');
+    }
+
+    if ($do === 'log_package_usage') {
+        $packageId = (int) ($_POST['package_id'] ?? 0);
+        $usedHours = (float) str_replace(',', '.', (string) ($_POST['used_hours'] ?? '1'));
+        $note = trim((string) ($_POST['note'] ?? ''));
+        $itemDate = trim((string) ($_POST['item_date'] ?? ''));
+        $noteWithDate = $itemDate !== '' ? $itemDate . ($note !== '' ? ' – ' . $note : '') : $note;
+        if ($usedHours > 0) {
+            $result = Pakete::logUsage($pdo, $packageId, $usedHours, null, $noteWithDate !== '' ? $noteWithDate : null);
+            if (!$result['ok']) {
+                $_SESSION['flash_error'] = $result['error'];
+            }
+        }
+        redirectBack('#pakete');
+    }
+
+    if ($do === 'delete_package_usage') {
+        Pakete::deleteUsageLogEntry($pdo, (int) ($_POST['log_id'] ?? 0));
+        redirectBack('#pakete');
+    }
 }
 
 $flashError = $_SESSION['flash_error'] ?? null;
@@ -367,6 +403,7 @@ $settings = $isLoggedIn ? Buchhaltung::allSettings($pdo) : [];
 $invoices = $isLoggedIn ? Buchhaltung::listInvoices($pdo) : [];
 $invoicableBookings = $isLoggedIn ? Booking::listForInvoicing($bookingPdo) : [];
 $availableYears = $isLoggedIn ? Buchhaltung::availableYears($pdo) : [];
+$packages = $isLoggedIn ? Pakete::listAll($pdo) : [];
 $csrf = $isLoggedIn ? csrfToken() : '';
 
 $viewYear = $currentYear;
@@ -426,54 +463,60 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
     --font-head:"Lora","Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
     --font-body:"Mulish",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   }
+  /* Kompaktes Layout: diese Seite wird ausschließlich am PC oder auf dem iPad im
+     Querformat verwaltet, nie auf dem Handy – deshalb bewusst auf Informations-
+     dichte statt auf kleine Bildschirme optimiert. */
   *{box-sizing:border-box;}
-  body{ margin:0; background:var(--cream); color:var(--ink); font-family:var(--font-body); line-height:1.5; }
-  header{ display:flex; justify-content:space-between; align-items:center; padding:1rem 1.5rem; background:var(--cream-light); border-bottom:1px solid var(--cream-dark); }
-  header a{ color:var(--ink-mute); text-decoration:none; font-size:.9rem; }
-  header .nav{ display:flex; gap:1.25rem; align-items:center; }
-  main{ max-width:960px; margin:0 auto; padding:2rem 1.25rem 4rem; }
-  h1{ font-family:var(--font-head); font-weight:600; }
-  h2{ font-family:var(--font-head); font-weight:600; font-size:1.15rem; margin:0 0 1rem; }
-  section.card{ background:var(--cream-light); border:1px solid var(--cream-dark); border-radius:14px; padding:1.25rem 1.5rem; margin-bottom:1.5rem; }
-  table{ width:100%; border-collapse:collapse; margin-bottom:1rem; font-size:.92rem; }
-  th, td{ text-align:left; padding:.5rem .4rem; border-bottom:1px solid var(--cream-dark); vertical-align:top; }
+  body{ margin:0; background:var(--cream); color:var(--ink); font-family:var(--font-body); line-height:1.4; font-size:.92rem; }
+  header{ display:flex; justify-content:space-between; align-items:center; padding:.6rem 1.25rem; background:var(--cream-light); border-bottom:1px solid var(--cream-dark); }
+  header a{ color:var(--ink-mute); text-decoration:none; font-size:.85rem; }
+  header .nav{ display:flex; gap:1rem; align-items:center; }
+  main{ max-width:1180px; margin:0 auto; padding:1.1rem 1.25rem 2.5rem; }
+  h1{ font-family:var(--font-head); font-weight:600; font-size:1.3rem; margin:0 0 .3rem; }
+  h2{ font-family:var(--font-head); font-weight:600; font-size:1rem; margin:0 0 .6rem; }
+  section.card{ background:var(--cream-light); border:1px solid var(--cream-dark); border-radius:12px; padding:.9rem 1.1rem; margin-bottom:.9rem; }
+  table{ width:100%; border-collapse:collapse; margin-bottom:.6rem; font-size:.85rem; }
+  th, td{ text-align:left; padding:.3rem .4rem; border-bottom:1px solid var(--cream-dark); vertical-align:top; }
   form.inline{ display:flex; gap:.5rem; flex-wrap:wrap; align-items:end; }
-  form.inline label{ display:flex; flex-direction:column; font-size:.8rem; color:var(--ink-mute); gap:.25rem; }
-  input, select, textarea{ font-family:inherit; font-size:.95rem; padding:.45rem .6rem; border:1.5px solid var(--cream-dark); border-radius:8px; background:#fff; color:var(--ink); }
-  textarea{ min-height:3.5rem; }
-  .btn{ border:none; border-radius:999px; padding:.5rem 1.1rem; font-weight:700; cursor:pointer; font-family:inherit; background:var(--gold); color:#fff; font-size:.88rem; text-decoration:none; display:inline-block; }
+  form.inline label{ display:flex; flex-direction:column; font-size:.76rem; color:var(--ink-mute); gap:.2rem; }
+  input, select, textarea{ font-family:inherit; font-size:.88rem; padding:.32rem .5rem; border:1.5px solid var(--cream-dark); border-radius:7px; background:#fff; color:var(--ink); }
+  textarea{ min-height:2.6rem; }
+  .btn{ border:none; border-radius:999px; padding:.38rem .95rem; font-weight:700; cursor:pointer; font-family:inherit; background:var(--gold); color:#fff; font-size:.82rem; text-decoration:none; display:inline-block; }
   .btn:hover{ background:var(--gold-dark); }
   .btn--danger{ background:var(--danger); }
   .btn--danger:hover{ opacity:.85; }
-  .btn--ghost{ background:none; color:var(--ink-mute); padding:.5rem .7rem; }
+  .btn--ghost{ background:none; color:var(--ink-mute); padding:.38rem .6rem; }
   .login-card{ max-width:340px; margin:3rem auto; }
   .login-card input[type=password]{ width:100%; margin-bottom:1rem; }
   .error{ color:var(--danger); font-weight:600; }
   .success{ color:#3f7d52; font-weight:600; }
-  .muted{ color:var(--ink-mute); font-size:.85rem; }
-  .badge{ display:inline-block; background:var(--cream-dark); border-radius:999px; padding:.1rem .6rem; font-size:.78rem; }
+  .muted{ color:var(--ink-mute); font-size:.8rem; }
+  .badge{ display:inline-block; background:var(--cream-dark); border-radius:999px; padding:.05rem .55rem; font-size:.72rem; }
   .badge--paid{ background:var(--green); }
   .badge--cancelled{ background:var(--danger); color:#fff; }
   .badge--overdue{ background:var(--danger); color:#fff; }
-  .quicknav{ margin:0 0 1.5rem; font-size:.9rem; }
+  .quicknav{ margin:0 0 .9rem; font-size:.85rem; }
   .quicknav a{ color:var(--ink-mute); }
-  .summary-cards{ display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1.25rem; }
-  .summary-tile{ background:#fff; border:1px solid var(--cream-dark); border-radius:10px; padding:.8rem 1.1rem; min-width:150px; }
-  .summary-tile .num{ font-family:var(--font-head); font-size:1.3rem; font-weight:600; }
-  .years a{ margin-right:.6rem; }
+  .summary-cards{ display:flex; gap:.7rem; flex-wrap:wrap; margin-bottom:.8rem; }
+  .summary-tile{ background:#fff; border:1px solid var(--cream-dark); border-radius:9px; padding:.55rem .85rem; min-width:130px; }
+  .summary-tile .num{ font-family:var(--font-head); font-size:1.1rem; font-weight:600; }
+  .years a{ margin-right:.5rem; }
   .years a.active{ color:var(--ink); font-weight:700; text-decoration:underline; }
-  .actions{ display:flex; gap:.4rem; flex-wrap:wrap; }
-  .pos-list{ display:flex; flex-direction:column; gap:.6rem; margin-bottom:.6rem; }
-  .pos-item{ background:#fff; border:1px solid var(--cream-dark); border-radius:10px; padding:.7rem; position:relative; }
-  .pos-item input{ width:100%; margin-top:.2rem; }
-  .pos-label{ font-size:.72rem; color:var(--ink-mute); font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
-  .pos-actions{ position:absolute; top:.5rem; right:.5rem; display:flex; gap:.2rem; }
-  .pos-btn{ background:none; border:none; cursor:pointer; color:var(--ink-mute); font-size:.9rem; line-height:1; padding:.1rem .35rem; border-radius:4px; font-weight:700; }
+  .actions{ display:flex; gap:.35rem; flex-wrap:wrap; }
+  .pos-list{ display:flex; flex-direction:column; gap:.45rem; margin-bottom:.5rem; }
+  .pos-item{ background:#fff; border:1px solid var(--cream-dark); border-radius:9px; padding:.55rem; position:relative; }
+  .pos-item input{ width:100%; margin-top:.15rem; }
+  .pos-label{ font-size:.68rem; color:var(--ink-mute); font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .pos-actions{ position:absolute; top:.4rem; right:.4rem; display:flex; gap:.15rem; }
+  .pos-btn{ background:none; border:none; cursor:pointer; color:var(--ink-mute); font-size:.85rem; line-height:1; padding:.1rem .3rem; border-radius:4px; font-weight:700; }
   .pos-btn:hover{ background:var(--cream-dark); }
   .pos-btn.del:hover{ color:#fff; background:var(--danger); }
-  .pos-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:.4rem; margin-top:.4rem; }
-  .btn-add{ background:var(--cream-dark); color:var(--ink-mute); border:1px dashed var(--ink-mute); border-radius:8px; padding:.5rem; width:100%; cursor:pointer; font-family:inherit; }
+  .pos-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:.35rem; margin-top:.35rem; }
+  .btn-add{ background:var(--cream-dark); color:var(--ink-mute); border:1px dashed var(--ink-mute); border-radius:7px; padding:.4rem; width:100%; cursor:pointer; font-family:inherit; }
   .btn-add:hover{ background:#e2d9c8; }
+  .progress{ background:var(--cream-dark); border-radius:999px; height:.5rem; overflow:hidden; width:100%; max-width:160px; }
+  .progress > span{ display:block; height:100%; background:var(--gold); }
+  .pkg-hours{ font-size:.78rem; color:var(--ink-mute); white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -512,6 +555,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
   <p class="quicknav">
     <a href="#uebersicht">Übersicht</a> ·
     <a href="#rechnungen">Rechnungen</a> ·
+    <a href="#pakete">Pakete</a> ·
     <a href="#export">Export</a> ·
     <a href="#einstellungen">Einstellungen</a>
   </p>
@@ -559,10 +603,24 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
           <td><?= $inv['due_date'] ? htmlspecialchars((new DateTimeImmutable($inv['due_date']))->format('d.m.Y')) : '<span class="muted">–</span>' ?></td>
           <td><?= htmlspecialchars($inv['client_name']) ?></td>
           <td><?= htmlspecialchars(Buchhaltung::formatEuro((int) $inv['amount_cents'])) ?></td>
-          <td><?= invoiceStatusBadge($inv['status']) ?> <?php if ($isOverdue): ?><span class="badge badge--overdue">Überfällig</span><?php endif; ?></td>
+          <td>
+            <?= invoiceStatusBadge($inv['status']) ?> <?php if ($isOverdue): ?><span class="badge badge--overdue">Überfällig</span><?php endif; ?>
+            <?php if (!empty($inv['online_payment_enabled']) && !empty($inv['payment_token'])): ?>
+              <br><a class="muted" href="/rechnung-bezahlen.php?token=<?= htmlspecialchars($inv['payment_token']) ?>" target="_blank" rel="noopener">Zahl-Link ↗</a>
+            <?php endif; ?>
+          </td>
           <td>
             <div class="actions">
               <a class="btn btn--ghost" href="?print_invoice=<?= (int) $inv['id'] ?>" target="_blank" rel="noopener">Drucken</a>
+              <?php if ($inv['status'] === 'offen'): ?>
+                <form method="post" style="margin:0">
+                  <input type="hidden" name="do" value="toggle_online_payment">
+                  <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+                  <input type="hidden" name="id" value="<?= (int) $inv['id'] ?>">
+                  <input type="hidden" name="enabled" value="<?= !empty($inv['online_payment_enabled']) ? '0' : '1' ?>">
+                  <button type="submit" class="btn btn--ghost"><?= !empty($inv['online_payment_enabled']) ? 'Online-Zahlung sperren' : 'Für Online-Zahlung freigeben' ?></button>
+                </form>
+              <?php endif; ?>
               <?php if ($inv['status'] === 'offen'): ?>
                 <form method="post" style="margin:0">
                   <input type="hidden" name="do" value="update_invoice_status">
@@ -709,6 +767,67 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
         btn.closest('.pos-item').remove();
       }
     </script>
+  </section>
+
+  <section class="card" id="pakete">
+    <h2>Pakete</h2>
+    <p class="muted">5-Stunden-Pakete, online gekauft über <a href="/paket-kaufen.php" target="_blank" rel="noopener">paket-kaufen.php</a>. Bezahlte Pakete erzeugen automatisch eine Rechnung (siehe „Rechnungen“ oben). Restguthaben wird bei jeder Terminbuchung mit Paket-Code automatisch abgezogen; Sitzungen, die nicht über die Website gebucht wurden, können hier manuell verrechnet werden.</p>
+    <table>
+      <thead><tr><th>Käufer*in</th><th>Status</th><th>Gekauft am</th><th>Restguthaben</th><th></th></tr></thead>
+      <tbody>
+      <?php foreach ($packages as $pkg): ?>
+        <tr>
+          <td>
+            <?= htmlspecialchars($pkg['client_name']) ?>
+            <br><span class="muted"><?= htmlspecialchars($pkg['client_email']) ?></span>
+          </td>
+          <td><?= invoiceStatusBadge($pkg['status'] === 'bezahlt' ? 'bezahlt' : ($pkg['status'] === 'storniert' ? 'storniert' : 'offen')) ?></td>
+          <td><?= htmlspecialchars($pkg['paid_at'] ? (new DateTimeImmutable($pkg['paid_at']))->format('d.m.Y') : (new DateTimeImmutable($pkg['created_at']))->format('d.m.Y')) ?></td>
+          <td>
+            <?php if ($pkg['status'] === 'bezahlt'): ?>
+              <div class="progress"><span style="width:<?= (float) $pkg['hours_total'] > 0 ? min(100, ($pkg['hours_used'] / (float) $pkg['hours_total']) * 100) : 0 ?>%"></span></div>
+              <span class="pkg-hours"><?= htmlspecialchars(rtrim(rtrim(number_format($pkg['hours_remaining'], 1, ',', ''), '0'), ',')) ?> von <?= (int) $pkg['hours_total'] ?> Std. übrig</span>
+            <?php else: ?>
+              <span class="muted">–</span>
+            <?php endif; ?>
+          </td>
+          <td>
+            <?php if ($pkg['status'] === 'bezahlt'): ?>
+            <details>
+              <summary class="muted" style="cursor:pointer;">Verbrauch (<?= (int) count(Pakete::usageLog($pdo, (int) $pkg['id'])) ?>)</summary>
+              <table style="margin-top:.4rem;">
+                <?php foreach (Pakete::usageLog($pdo, (int) $pkg['id']) as $log): ?>
+                  <tr>
+                    <td style="border:none; padding:.2rem 0;"><?= htmlspecialchars(rtrim(rtrim(number_format((float) $log['used_hours'], 1, ',', ''), '0'), ',')) ?> Std.</td>
+                    <td style="border:none; padding:.2rem 0;"><?= htmlspecialchars((string) $log['note']) ?></td>
+                    <td style="border:none; padding:.2rem 0;">
+                      <form method="post" style="margin:0" onsubmit="return confirm('Diese Verbrauchsbuchung wirklich löschen (Stunde wird dem Paket wieder gutgeschrieben)?');">
+                        <input type="hidden" name="do" value="delete_package_usage">
+                        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+                        <input type="hidden" name="log_id" value="<?= (int) $log['id'] ?>">
+                        <button type="submit" class="pos-btn del" title="Löschen">×</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </table>
+              <form method="post" class="inline" style="margin-top:.5rem;">
+                <input type="hidden" name="do" value="log_package_usage">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+                <input type="hidden" name="package_id" value="<?= (int) $pkg['id'] ?>">
+                <label>Datum <input type="date" name="item_date" value="<?= htmlspecialchars($today) ?>"></label>
+                <label>Stunden <input type="text" inputmode="decimal" name="used_hours" value="1" style="width:4rem;"></label>
+                <label>Notiz <input type="text" name="note" placeholder="z. B. Sitzung vor Ort"></label>
+                <button type="submit" class="btn btn--ghost">Verrechnen</button>
+              </form>
+            </details>
+            <?php endif; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      <?php if (!$packages): ?><tr><td colspan="5" class="muted">Noch keine Pakete gekauft.</td></tr><?php endif; ?>
+      </tbody>
+    </table>
   </section>
 
   <section class="card" id="export">

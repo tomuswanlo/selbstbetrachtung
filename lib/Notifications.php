@@ -1,0 +1,106 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * E-Mail-Versand, der von mehreren Zahlungs-Endpunkten gebraucht wird
+ * (payment-webhook.php für Stripe/als PayPal-Backup, payment-erfolg.php als
+ * primärer PayPal-Bestätigungspfad) – deshalb hier ausgelagert statt wie
+ * sonst in dieser Codebasis üblich pro Datei dupliziert, da es sich um recht
+ * umfangreiche Funktionen handelt.
+ */
+
+if (!function_exists('baseUrl')) {
+    function baseUrl(): string
+    {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+        $scheme = $https ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'selbstbetrachtung-online.de';
+        return $scheme . '://' . $host;
+    }
+}
+
+/**
+ * Verschickt die Terminbestätigung für einen online bezahlten Folgetermin.
+ * Bei einer "vor Ort"-Buchung übernimmt das termin-api.php synchron direkt
+ * nach dem Anlegen – hier ist das nötig, weil die Buchung bei Online-Zahlung
+ * erst durch die Zahlungsbestätigung (Webhook bzw. bei PayPal die Capture in
+ * payment-erfolg.php), nicht durch den ursprünglichen Buchungsrequest, als
+ * abgeschlossen gilt. Rein informativ/best effort wie die übrigen
+ * Mailversände dieser Codebasis: ein Fehlschlag wird geloggt, nicht dem
+ * auslösenden Request (Stripe/PayPal/Browser-Redirect) als Fehler gemeldet.
+ */
+function sendSessionPaidConfirmation(int $bookingId): void
+{
+    require_once __DIR__ . '/Booking.php';
+    $pdo = Booking::db();
+    $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = :id');
+    $stmt->execute(['id' => $bookingId]);
+    $booking = $stmt->fetch();
+    if (!$booking || !$booking['email']) {
+        return;
+    }
+
+    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    if (!file_exists($smtpConfigFile)) {
+        return;
+    }
+    require_once $smtpConfigFile;
+    require_once __DIR__ . '/PHPMailer/src/Exception.php';
+    require_once __DIR__ . '/PHPMailer/src/PHPMailer.php';
+    require_once __DIR__ . '/PHPMailer/src/SMTP.php';
+
+    $typeLabel = Booking::TYPES[$booking['type']]['label'] ?? $booking['type'];
+    $dateFormatted = (new DateTimeImmutable($booking['date']))->format('d.m.Y');
+    $cancelUrl = baseUrl() . '/termin-absagen.php?token=' . urlencode((string) $booking['cancel_token']);
+
+    try {
+        $confirm = new PHPMailer\PHPMailer\PHPMailer(true);
+        $confirm->isSMTP();
+        $confirm->Host = SMTP_HOST;
+        $confirm->SMTPAuth = true;
+        $confirm->Username = SMTP_USER;
+        $confirm->Password = SMTP_PASS;
+        $confirm->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $confirm->Port = SMTP_PORT;
+        $confirm->CharSet = 'UTF-8';
+        $confirm->setFrom(SMTP_USER, 'Gabriele Küppers – Selbstbetrachtung');
+        $confirm->addAddress($booking['email'], $booking['name']);
+        $confirm->Subject = "Terminbestätigung: {$typeLabel} am {$dateFormatted}, {$booking['start_time']} Uhr";
+        $confirm->Body =
+            "Liebe/r {$booking['name']},\n\n" .
+            "vielen Dank für Ihre Online-Zahlung – Ihr Termin ist bestätigt:\n\n" .
+            "{$typeLabel}\n" .
+            "{$dateFormatted}, {$booking['start_time']}–{$booking['end_time']} Uhr\n\n" .
+            "Sollten Sie den Termin nicht wahrnehmen können, sagen Sie ihn bitte hier ab:\n" .
+            "{$cancelUrl}\n\n" .
+            "Bitte beachten Sie: Bei einer Absage weniger als 24 Stunden vor dem Termin wird das Honorar trotz Absage fällig " .
+            "(siehe AGB).\n\n" .
+            "Diese Bestätigung wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
+            "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
+            "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n";
+        $confirm->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Terminbestätigung (Online-Zahlung) an Klient*in fehlgeschlagen: ' . $e->getMessage());
+    }
+
+    try {
+        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = SMTP_USER;
+        $mail->Password = SMTP_PASS;
+        $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $mail->Port = SMTP_PORT;
+        $mail->CharSet = 'UTF-8';
+        $mail->setFrom(SMTP_USER, 'Selbstbetrachtung Website');
+        $mail->addAddress(MAIL_TO);
+        $mail->addReplyTo($booking['email'], $booking['name']);
+        $mail->Subject = "Online bezahlter Termin: {$typeLabel} am {$dateFormatted}, {$booking['start_time']} Uhr";
+        $mail->Body = "Online-Zahlung eingegangen und Termin bestätigt.\n\nName: {$booking['name']}\nE-Mail: {$booking['email']}\n{$typeLabel} am {$dateFormatted}, {$booking['start_time']}–{$booking['end_time']} Uhr\n";
+        $mail->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Praxis-Benachrichtigung (Online-Zahlung) fehlgeschlagen: ' . $e->getMessage());
+    }
+}

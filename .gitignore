@@ -1,4 +1,6 @@
 smtp_config.php
 termin_admin_config.php
+stripe_config.php
+paypal_config.php
 data/*.sqlite
 data/*.sqlite-*
