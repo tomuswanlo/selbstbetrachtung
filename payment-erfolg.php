@@ -53,6 +53,8 @@ if ($provider === 'paypal' && in_array($kind, ['package', 'session', 'invoice'],
             $errorMessage = $result['error'] ?? '';
             if ($result['ok'] && $kind === 'session' && empty($result['already_processed'])) {
                 sendSessionPaidConfirmation($refId);
+            } elseif ($result['ok'] && $kind === 'package' && empty($result['already_processed'])) {
+                sendPackagePaidConfirmation($refId);
             }
         } else {
             $status = 'error';

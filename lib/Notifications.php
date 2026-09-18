@@ -104,3 +104,80 @@ function sendSessionPaidConfirmation(int $bookingId): void
         error_log('Praxis-Benachrichtigung (Online-Zahlung) fehlgeschlagen: ' . $e->getMessage());
     }
 }
+
+/**
+ * Verschickt die Kaufbestätigung für ein bezahltes 5-Stunden-Paket – das ist die
+ * EINZIGE Stelle, an der der Klient seinen purchase_token (Paket-Code) erhält,
+ * ohne den sich später keine Stunde einlösen lässt (siehe termin-bezahlen.php).
+ * Bis zu diesem Fix wurde nach einem Paket-Kauf gar keine E-Mail verschickt.
+ */
+function sendPackagePaidConfirmation(int $packageId): void
+{
+    require_once __DIR__ . '/Pakete.php';
+    require_once __DIR__ . '/Buchhaltung.php';
+    $pdo = Buchhaltung::db();
+    $pkg = Pakete::findById($pdo, $packageId);
+    if (!$pkg || !$pkg['client_email']) {
+        return;
+    }
+
+    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    if (!file_exists($smtpConfigFile)) {
+        return;
+    }
+    require_once $smtpConfigFile;
+    require_once __DIR__ . '/PHPMailer/src/Exception.php';
+    require_once __DIR__ . '/PHPMailer/src/PHPMailer.php';
+    require_once __DIR__ . '/PHPMailer/src/SMTP.php';
+
+    $hours = (int) $pkg['hours_total'];
+    $priceLabel = Buchhaltung::formatEuro((int) $pkg['price_cents']);
+
+    try {
+        $confirm = new PHPMailer\PHPMailer\PHPMailer(true);
+        $confirm->isSMTP();
+        $confirm->Host = SMTP_HOST;
+        $confirm->SMTPAuth = true;
+        $confirm->Username = SMTP_USER;
+        $confirm->Password = SMTP_PASS;
+        $confirm->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $confirm->Port = SMTP_PORT;
+        $confirm->CharSet = 'UTF-8';
+        $confirm->setFrom(SMTP_USER, 'Gabriele Küppers – Selbstbetrachtung');
+        $confirm->addAddress($pkg['client_email'], $pkg['client_name']);
+        $confirm->Subject = "Ihr {$hours}-Stunden-Paket ist bezahlt";
+        $confirm->Body =
+            "Liebe/r {$pkg['client_name']},\n\n" .
+            "vielen Dank für Ihre Online-Zahlung – Ihr {$hours}-Stunden-Paket ({$priceLabel}) ist bestätigt.\n\n" .
+            "Ihr Paket-Code lautet:\n{$pkg['purchase_token']}\n\n" .
+            "Bei jeder künftigen Terminbuchung eines Folgetermins können Sie diesen Code auf der Bezahlseite " .
+            "im Feld \"Mit Paket-Code bezahlen\" eingeben, um eine Stunde von Ihrem Restguthaben abzubuchen, " .
+            "statt erneut zu bezahlen. Bewahren Sie diese E-Mail daher gut auf.\n\n" .
+            "Diese Bestätigung wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
+            "Herzliche Grüße\nGabriele Küppers\nSelbstbetrachtung – Psychologische Beratung / Coaching\n" .
+            "Dachsweg 27, 41189 Mönchengladbach\nkontakt@selbstbetrachtung-online.de\n";
+        $confirm->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Paket-Kaufbestätigung an Klient*in fehlgeschlagen: ' . $e->getMessage());
+    }
+
+    try {
+        $mail = new PHPMailer\PHPMailer\PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host = SMTP_HOST;
+        $mail->SMTPAuth = true;
+        $mail->Username = SMTP_USER;
+        $mail->Password = SMTP_PASS;
+        $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        $mail->Port = SMTP_PORT;
+        $mail->CharSet = 'UTF-8';
+        $mail->setFrom(SMTP_USER, 'Selbstbetrachtung Website');
+        $mail->addAddress(MAIL_TO);
+        $mail->addReplyTo($pkg['client_email'], $pkg['client_name']);
+        $mail->Subject = "Online bezahltes {$hours}-Stunden-Paket: {$pkg['client_name']}";
+        $mail->Body = "Paket-Kauf online bezahlt.\n\nName: {$pkg['client_name']}\nE-Mail: {$pkg['client_email']}\nBetrag: {$priceLabel}\n";
+        $mail->send();
+    } catch (PHPMailer\PHPMailer\Exception $e) {
+        error_log('Praxis-Benachrichtigung (Paket-Kauf) fehlgeschlagen: ' . $e->getMessage());
+    }
+}

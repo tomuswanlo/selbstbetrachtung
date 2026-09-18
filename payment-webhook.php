@@ -71,6 +71,8 @@ if ($provider === 'stripe') {
                 error_log('Stripe-Webhook: Verbuchung fehlgeschlagen: ' . ($result['error'] ?? ''));
             } elseif ($kind === 'session' && empty($result['already_processed'])) {
                 sendSessionPaidConfirmation($referenceId);
+            } elseif ($kind === 'package' && empty($result['already_processed'])) {
+                sendPackagePaidConfirmation($referenceId);
             }
         } else {
             error_log('Stripe-Webhook: unvollständige Metadaten in checkout.session.completed.');
@@ -122,6 +124,8 @@ if ($provider === 'paypal') {
                 error_log('PayPal-Webhook: Verbuchung fehlgeschlagen: ' . ($result['error'] ?? ''));
             } elseif ($ctx['kind'] === 'session' && empty($result['already_processed'])) {
                 sendSessionPaidConfirmation($ctx['id']);
+            } elseif ($ctx['kind'] === 'package' && empty($result['already_processed'])) {
+                sendPackagePaidConfirmation($ctx['id']);
             }
         } else {
             error_log('PayPal-Webhook: custom_id nicht auswertbar: ' . $customId);
