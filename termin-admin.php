@@ -151,7 +151,9 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     }
 
     if ($do === 'mark_refunded') {
-        Booking::markRefunded($pdo, (int) ($_POST['id'] ?? 0));
+        $bookingId = (int) ($_POST['id'] ?? 0);
+        Booking::markRefunded($pdo, $bookingId);
+        sendRefundProcessedNotice($bookingId);
         redirectBack();
     }
 
@@ -294,7 +296,7 @@ if (isset($_GET['edit_block'])) {
   <?php if ($refundPending): ?>
   <section class="card" style="border-color:var(--danger);">
     <h2>Offene Erstattungen</h2>
-    <p class="muted">Diese Termine wurden online bezahlt und danach rechtzeitig (≥ <?= Booking::REFUND_LEAD_HOURS ?>h vorher) storniert – die Zahlung wurde <strong>nicht</strong> automatisch erstattet. Bitte manuell im Stripe-/PayPal-Dashboard erstatten (Referenz siehe unten), danach hier abhaken.</p>
+    <p class="muted">Diese Termine wurden online bezahlt und danach rechtzeitig (≥ <?= Booking::REFUND_LEAD_HOURS ?>h vorher) storniert – die Zahlung wurde <strong>nicht</strong> automatisch erstattet. Bitte zuerst manuell im Stripe-/PayPal-Dashboard erstatten (Referenz siehe unten), <strong>danach erst</strong> hier abhaken – der Klient/die Klientin bekommt beim Abhaken automatisch eine Bestätigungsmail.</p>
     <table>
       <thead><tr><th>Datum</th><th>Klient*in</th><th>Anbieter</th><th>Referenz</th><th></th></tr></thead>
       <tbody>
