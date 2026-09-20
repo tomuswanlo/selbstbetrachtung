@@ -539,6 +539,7 @@ $monthNames = [1 => 'Januar', 2 => 'Februar', 3 => 'März', 4 => 'April', 5 => '
   <div class="nav">
   <?php if ($isLoggedIn): ?>
     <a href="termin-admin.php">Terminverwaltung</a>
+    <a href="foto-admin.php">Foto</a>
     <form method="post" style="margin:0"><input type="hidden" name="do" value="logout"><button type="submit" class="btn btn--ghost">Abmelden</button></form>
   <?php else: ?>
     <a href="/">Zur Website</a>

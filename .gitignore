@@ -4,3 +4,5 @@ stripe_config.php
 paypal_config.php
 data/*.sqlite
 data/*.sqlite-*
+data/about-photo.jpg
+data/about-photo.jpg.tmp

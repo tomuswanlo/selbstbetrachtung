@@ -269,6 +269,7 @@ if (isset($_GET['edit_block'])) {
   <?php if ($isLoggedIn): ?>
     <div style="display:flex; gap:1.25rem; align-items:center;">
       <a href="buchhaltung-admin.php">Buchhaltung</a>
+      <a href="foto-admin.php">Foto</a>
       <form method="post" style="margin:0"><input type="hidden" name="do" value="logout"><button type="submit" class="btn" style="background:none;color:var(--ink-mute)">Abmelden</button></form>
     </div>
   <?php else: ?>
