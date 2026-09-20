@@ -144,7 +144,11 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
     if ($do === 'cancel_booking') {
         $bookingId = (int) ($_POST['id'] ?? 0);
         $result = Booking::cancelById($pdo, $bookingId, 'admin');
-        if ($result['ok'] && in_array($result['booking']['payment_status'], ['paid', 'package', 'refunded', 'refund_pending'], true)) {
+        // Mail geht raus bei bezahlten Terminen (Zahlungskonsequenz mitzuteilen) UND
+        // immer beim Erstgespräch (auch wenn nie bezahlt - hier ausdrücklich gewünscht).
+        $wasPaid = $result['ok'] && in_array($result['booking']['payment_status'], ['paid', 'package', 'refunded', 'refund_pending'], true);
+        $isErstgespraech = $result['ok'] && $result['booking']['type'] === 'erstgespraech';
+        if ($wasPaid || $isErstgespraech) {
             sendAdminCancellationNotice($bookingId, $result['booking']['payment_status']);
         }
         redirectBack();

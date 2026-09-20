@@ -309,8 +309,10 @@ function sendAdminCancellationNotice(int $bookingId, string $paymentStatusAfterC
     $refundNote = match ($paymentStatusAfterCancel) {
         'refunded' => 'Ihre Paketstunde wurde Ihnen gutgeschrieben.',
         'refund_pending' => 'Ihre Online-Zahlung wird zeitnah erstattet.',
-        default => 'Da die Absage weniger als ' . Booking::REFUND_LEAD_HOURS . ' Stunden vor dem Termin erfolgt, verfällt die Zahlung bzw. Paketstunde gemäß unserer AGB.',
+        'paid', 'package' => 'Da die Absage weniger als ' . Booking::REFUND_LEAD_HOURS . ' Stunden vor dem Termin erfolgt, verfällt die Zahlung bzw. Paketstunde gemäß unserer AGB.',
+        default => '', // kein bezahlter Termin (z. B. Erstgespräch) - nichts zu Zahlung/Erstattung zu sagen
     };
+    $refundBlock = $refundNote !== '' ? "{$refundNote}\n\n" : '';
 
     try {
         $mail = new PHPMailer\PHPMailer\PHPMailer(true);
@@ -330,7 +332,7 @@ function sendAdminCancellationNotice(int $bookingId, string $paymentStatusAfterC
             "Ihr Termin wurde von uns storniert:\n\n" .
             "{$typeLabel}\n" .
             "{$dateFormatted}, {$booking['start_time']}–{$booking['end_time']} Uhr\n\n" .
-            "{$refundNote}\n\n" .
+            $refundBlock .
             "Bei Fragen erreichen Sie uns über das Kontaktformular (" . baseUrl() . "/#kontakt) " .
             "oder telefonisch unter +49 151 4135 7281.\n\n" .
             "Diese Mail wird automatisch versendet, bitte antworten Sie bei Rückfragen direkt auf diese E-Mail.\n\n" .
