@@ -14,9 +14,15 @@
   </url>
   <url>
     <loc>https://selbstbetrachtung-online.de/blog.php</loc>
-    <lastmod>2026-09-14</lastmod>
+    <lastmod>2026-09-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://selbstbetrachtung-online.de/blog.php?post=spazieren-statt-netflix-stressabbau</loc>
+    <lastmod>2026-09-21</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://selbstbetrachtung-online.de/blog.php?post=sinn-im-leben-kohaerenz-statt-suche</loc>

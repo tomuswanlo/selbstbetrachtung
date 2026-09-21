@@ -25,6 +25,40 @@ final class BlogPosts
     {
         return [
             [
+                'slug' => 'spazieren-statt-netflix-stressabbau',
+                'title' => 'Warum ein Spaziergang mehr bringt als Netflix',
+                'date' => '2026-09-21',
+                'excerpt' => 'Ein aktueller Studien-Review zeigt: Achtsamkeit kombiniert mit Bewegung senkt Stress stärker als reines Ausruhen. Was das für Ihren Alltag bedeutet.',
+                'image' => null,
+                'image_alt' => null,
+                'source_label' => null,
+                'source_url' => null,
+                'body' => <<<'HTML'
+<p>Nach einem anstrengenden Tag auf die Couch fallen und eine Serie schauen – für viele ist das der Inbegriff von Entspannung. Ein aktueller systematischer Review zeichnet ein anderes Bild: Die Kombination aus Achtsamkeit und körperlicher Aktivität senkt das Stresslevel nachweislich stärker als rein passive Methoden wie Fernsehen, Musik hören oder einfaches Nichtstun.</p>
+
+<h2>Was der Review zeigt</h2>
+<p>Verglichen wurden aktive Ansätze – Bewegung verbunden mit bewusster Aufmerksamkeit – mit rein passiven Entspannungsformen. Das Ergebnis: Aktive, achtsame Bewegung wirkt sich stärker auf das Stressniveau aus als passives Ausruhen allein. Entscheidend ist dabei laut den Autor:innen weniger die konkrete Methode als vielmehr, wie konsequent sie tatsächlich umgesetzt wird.</p>
+
+<h2>Der Mythos „Entspannung heißt Stillhalten"</h2>
+<p>Diese Erkenntnis widerspricht einer weitverbreiteten Annahme: dass Erholung vor allem bedeutet, sich möglichst wenig zu bewegen. Dabei ist unser Nervensystem darauf ausgelegt, Anspannung auch körperlich zu verarbeiten – nicht nur gedanklich. Passives Ablenken kann kurzfristig guttun, verarbeitet die eigentliche Stressreaktion des Körpers aber oft nicht wirklich.</p>
+
+<h2>Warum ein achtsamer Spaziergang so gut funktioniert</h2>
+<p>Ein Spaziergang verbindet beides auf einfache Weise: Bewegung und die Möglichkeit, bewusst wahrzunehmen, was gerade um Sie herum und in Ihnen passiert. Das muss nichts Kompliziertes sein – es reicht oft schon, für ein paar Minuten bewusst auf den eigenen Atem und die Schritte zu achten, statt nebenbei aufs Handy zu schauen.</p>
+
+<p>Ein kleines, alltagstaugliches Ritual: fünf Minuten gehen und dabei bewusst atmen. Kein Trainingsplan, kein Zeitdruck – einfach ein kurzer, bewusster Ortswechsel nach der Arbeit, anstatt direkt vor dem Bildschirm zu landen.</p>
+
+<h2>Es kommt auf die Regelmäßigkeit an, nicht auf die Perfektion</h2>
+<p>Der vielleicht wichtigste Punkt des Reviews: Nicht die „richtige" Methode entscheidet, sondern wie regelmäßig sie stattfindet. Ein kurzer, immer wiederkehrender achtsamer Spaziergang bringt langfristig mehr als ein aufwendiges Programm, das nach zwei Wochen wieder im Sand verläuft.</p>
+
+<h2>Wo Beratung ansetzen kann</h2>
+<p>Häufig ist nicht das fehlende Wissen das Problem, sondern die Umsetzung im Alltag – vor allem an Tagen, an denen genau das schwerfällt. Genau hier kann psychologische Beratung ansetzen: nicht mit einem weiteren starren Plan, sondern dabei, herauszufinden, welches kleine, aktive Ritual tatsächlich zu Ihrem Alltag passt und sich auch in stressigen Phasen durchhalten lässt.</p>
+
+<p>Wenn Sie das Gefühl haben, im eigenen Alltag kaum noch zur Ruhe zu kommen: Ein <a href="/#kontakt">kostenloses, unverbindliches Erstgespräch</a> ist ein guter erster Schritt.</p>
+
+<p><em>Hinweis: Dieser Beitrag beschreibt allgemeine Forschungsergebnisse, keine individuelle medizinische Empfehlung. Bei anhaltenden Stresssymptomen oder gesundheitlichen Beschwerden wenden Sie sich bitte zusätzlich an eine Ärztin, einen Arzt oder eine entsprechende Fachperson.</em></p>
+HTML,
+            ],
+            [
                 'slug' => 'sinn-im-leben-kohaerenz-statt-suche',
                 'title' => 'Sinn im Leben: Warum Kohärenz mehr zählt als Suche',
                 'date' => '2026-09-14',
