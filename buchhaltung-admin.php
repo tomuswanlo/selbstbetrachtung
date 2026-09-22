@@ -301,6 +301,40 @@ if ($isLoggedIn && isset($_GET['print_invoice'])) {
     exit;
 }
 
+// Liefert die unveränderliche Archiv-Kopie aus (siehe archiveInvoiceHtml) statt einer
+// Live-Neuberechnung – zum lokalen Sichern/Abgleichen der Rechnungsarchiv-Dateien.
+if ($isLoggedIn && isset($_GET['download_archive'])) {
+    $safeNumber = preg_replace('/[^A-Za-z0-9_-]/', '_', (string) $_GET['download_archive']);
+    $path = __DIR__ . '/data/rechnungen_archiv/' . $safeNumber . '.html';
+    if (!is_file($path)) {
+        http_response_code(404);
+        exit('Archiv-Datei nicht gefunden.');
+    }
+    header('Content-Type: text/html; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $safeNumber . '.html"');
+    header('Content-Length: ' . (string) filesize($path));
+    readfile($path);
+    exit;
+}
+
+// Listet alle Rechnungsnummern, für die eine Archiv-Datei existiert (JSON) – damit sich
+// der lokale Ordner DOX\Belege\Rechnungen\ automatisiert mit dem Server abgleichen lässt,
+// ohne jede Nummer einzeln raten/anfragen zu müssen.
+if ($isLoggedIn && isset($_GET['list_archive'])) {
+    $dir = __DIR__ . '/data/rechnungen_archiv';
+    $numbers = [];
+    if (is_dir($dir)) {
+        foreach (scandir($dir) as $f) {
+            if (str_ends_with($f, '.html')) {
+                $numbers[] = substr($f, 0, -5);
+            }
+        }
+    }
+    header('Content-Type: application/json; charset=UTF-8');
+    echo json_encode($numbers);
+    exit;
+}
+
 if ($isLoggedIn && isset($_GET['export_csv'])) {
     $exportYear = (int) $_GET['export_csv'];
     $rows = Buchhaltung::exportRows($pdo, $exportYear);
