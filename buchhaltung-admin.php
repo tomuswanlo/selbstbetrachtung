@@ -49,8 +49,12 @@ function invoiceStatusBadge(string $status): string
     return '<span class="badge ' . $class . '">' . htmlspecialchars($label) . '</span>';
 }
 
-/** Rendert die eigenständige Druckansicht einer Rechnung (kein Layout der übrigen Seite) und beendet das Skript. */
-function renderInvoicePrint(array $inv, array $settings): void
+/**
+ * Baut die Rechnungs-HTML-Seite als String (statt sie direkt auszugeben) – einzige
+ * Quelle für das Rechnungslayout, genutzt sowohl von der Live-Druckansicht
+ * (renderInvoicePrint) als auch vom unveränderlichen Archiv (archiveInvoiceHtml).
+ */
+function buildInvoiceHtml(array $inv, array $settings): string
 {
     $issued = (new DateTimeImmutable($inv['issued_at']))->format('d.m.Y');
     $due = $inv['due_date'] ? (new DateTimeImmutable((string) $inv['due_date']))->format('d.m.Y') : null;
@@ -60,6 +64,7 @@ function renderInvoicePrint(array $inv, array $settings): void
     $hasBank = trim((string) $settings['sender_bank_iban']) !== '';
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
     $baseUrl = ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'selbstbetrachtung-online.de');
+    ob_start();
     ?><!DOCTYPE html>
 <html lang="de">
 <head>
@@ -224,6 +229,42 @@ function renderInvoicePrint(array $inv, array $settings): void
 </body>
 </html>
 <?php
+    return ob_get_clean();
+}
+
+/** Rendert die eigenständige Druckansicht einer Rechnung (kein Layout der übrigen Seite). */
+function renderInvoicePrint(array $inv, array $settings): void
+{
+    echo buildInvoiceHtml($inv, $settings);
+}
+
+/**
+ * Speichert eine unveränderliche HTML-Momentaufnahme der Rechnung im Zustand zum
+ * Ausstellungszeitpunkt (§147 AO, 10 Jahre Aufbewahrungspflicht) – unabhängig davon,
+ * ob sich später Einstellungen (Bankverbindung, Hinweistexte) oder der Zahlungsstatus
+ * ändern. Wird einmalig bei der Rechnungserstellung aufgerufen, nie danach erneut
+ * überschrieben. Liegt in data/ (per data/.htaccess bereits komplett gesperrt, siehe
+ * lib/Booking.php/lib/Buchhaltung.php), kein zusätzlicher Schutzmechanismus nötig.
+ * Best effort wie der übrige Mailversand dieser Codebasis: ein Fehlschlag wird
+ * geloggt, blockiert aber nicht die eigentliche Rechnungserstellung.
+ */
+function archiveInvoiceHtml(array $invoice, array $settings): void
+{
+    try {
+        $dir = __DIR__ . '/data/rechnungen_archiv';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+        $safeNumber = preg_replace('/[^A-Za-z0-9_-]/', '_', $invoice['invoice_number']);
+        $path = $dir . '/' . $safeNumber . '.html';
+        if (file_exists($path)) {
+            return; // nie überschreiben - die Archivkopie ist absichtlich unveränderlich
+        }
+        file_put_contents($path, buildInvoiceHtml($invoice, $settings));
+        @chmod($path, 0664);
+    } catch (Throwable $e) {
+        error_log('Rechnungs-Archivierung fehlgeschlagen (' . $invoice['invoice_number'] . '): ' . $e->getMessage());
+    }
 }
 
 $isLoggedIn = !empty($_SESSION['termin_admin']);
@@ -355,6 +396,10 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         ], $items);
 
         if ($result['ok']) {
+            $freshInvoice = Buchhaltung::findInvoice($pdo, $result['id']);
+            if ($freshInvoice) {
+                archiveInvoiceHtml($freshInvoice, Buchhaltung::allSettings($pdo));
+            }
             $_SESSION['flash_success'] = 'Rechnung ' . $result['invoice_number'] . ' angelegt.';
         } else {
             $_SESSION['flash_error'] = $result['error'];

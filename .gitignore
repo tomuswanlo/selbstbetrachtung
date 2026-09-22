@@ -6,3 +6,4 @@ data/*.sqlite
 data/*.sqlite-*
 data/about-photo.jpg
 data/about-photo.jpg.tmp
+data/rechnungen_archiv/*.html
