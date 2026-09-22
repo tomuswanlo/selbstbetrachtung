@@ -482,6 +482,33 @@ if ($isLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST' && checkCsrf()) {
         }
         redirectBack('#pakete');
     }
+
+    // Einmalige Nachbefüllung fürs Rechnungsarchiv (archiveInvoiceHtml, siehe oben) für
+    // Rechnungen, die vor Einführung dieses Features angelegt wurden. Nutzt dabei die
+    // AKTUELLEN Einstellungen (Bankverbindung, Hinweistexte) statt des exakten Stands
+    // zum ursprünglichen Ausstellungsdatum – das ist bei bereits bestehenden Rechnungen
+    // technisch nicht anders möglich. Überschreibt nie eine schon vorhandene Archiv-Datei
+    // (siehe archiveInvoiceHtml), daher gefahrlos mehrfach aufrufbar.
+    if ($do === 'backfill_archive') {
+        $settingsForBackfill = Buchhaltung::allSettings($pdo);
+        $backfilled = 0;
+        foreach (Buchhaltung::listInvoices($pdo) as $inv) {
+            $dir = __DIR__ . '/data/rechnungen_archiv';
+            $safeNumber = preg_replace('/[^A-Za-z0-9_-]/', '_', $inv['invoice_number']);
+            if (is_file($dir . '/' . $safeNumber . '.html')) {
+                continue;
+            }
+            $full = Buchhaltung::findInvoice($pdo, (int) $inv['id']);
+            if ($full) {
+                archiveInvoiceHtml($full, $settingsForBackfill);
+                $backfilled++;
+            }
+        }
+        $_SESSION['flash_success'] = $backfilled > 0
+            ? $backfilled . ' Rechnung(en) nachträglich archiviert (mit aktuellen Einstellungen, da älter als diese Funktion).'
+            : 'Nichts zu tun – alle Rechnungen haben bereits eine Archiv-Datei.';
+        redirectBack('#rechnungen');
+    }
 }
 
 $flashError = $_SESSION['flash_error'] ?? null;
