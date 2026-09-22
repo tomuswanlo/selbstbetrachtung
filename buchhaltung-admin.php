@@ -213,7 +213,7 @@ function renderInvoicePrint(array $inv, array $settings): void
 
   <div class="inv-note"><strong>Hinweis:</strong> <?= htmlspecialchars($settings['kleinunternehmer_hinweis']) ?> Diese Rechnung ist maschinell erstellt und ohne Unterschrift gültig.</div>
   <?php if ($inv['notes']): ?><div class="inv-note"><?= nl2br(htmlspecialchars((string) $inv['notes'])) ?></div><?php endif; ?>
-  <?php if (trim((string) $settings['payment_terms_note']) !== ''): ?><p style="font-size:11px;color:var(--ik3);margin-top:10px"><?= htmlspecialchars($settings['payment_terms_note']) ?></p><?php endif; ?>
+  <?php if ($inv['status'] === 'offen' && trim((string) $settings['payment_terms_note']) !== ''): ?><p style="font-size:11px;color:var(--ik3);margin-top:10px"><?= htmlspecialchars($settings['payment_terms_note']) ?></p><?php endif; ?>
 
   <div class="inv-footer">
     <div class="footer-brand">Selbstbetrachtung</div>
