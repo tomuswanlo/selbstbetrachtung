@@ -293,6 +293,7 @@ final class Buchhaltung
             'payment_terms_note' => self::DEFAULT_PAYMENT_TERMS,
             'price_erstgespraech_cents' => '',
             'price_folgetermin_cents' => '',
+            'archive_sync_token' => '', // interner Zugangs-Token fürs Rechnungsarchiv, siehe buchhaltung-admin.php
         ];
         $stmt = $pdo->query('SELECT key, value FROM settings');
         foreach ($stmt->fetchAll() as $row) {

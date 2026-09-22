@@ -38,6 +38,31 @@ function redirectBack(string $hash = ''): void
     exit;
 }
 
+/**
+ * Eigener, schmaler Zugangs-Token NUR für die beiden Lese-Endpunkte des
+ * Rechnungsarchivs (list_archive/download_archive) – erlaubt einer monatlichen
+ * Scheduled-Task-Routine den automatischen Abgleich, ohne dass dafür das volle
+ * Admin-Passwort in einer lokalen Datei liegen müsste. Wer diesen Token hätte,
+ * käme NUR an bereits ausgestellte Rechnungs-HTMLs, nicht an sonstige
+ * Admin-Funktionen (Rechnung anlegen/stornieren, Einstellungen etc.).
+ * Wird beim ersten Bedarf einmalig erzeugt und in den Einstellungen gespeichert.
+ */
+function getArchiveSyncToken(PDO $pdo): string
+{
+    $token = Buchhaltung::allSettings($pdo)['archive_sync_token'] ?? '';
+    if ($token === '') {
+        $token = bin2hex(random_bytes(24));
+        Buchhaltung::setSetting($pdo, 'archive_sync_token', $token);
+    }
+    return $token;
+}
+
+function archiveSyncTokenValid(PDO $pdo): bool
+{
+    $given = (string) ($_GET['sync_token'] ?? '');
+    return $given !== '' && hash_equals(getArchiveSyncToken($pdo), $given);
+}
+
 function invoiceStatusBadge(string $status): string
 {
     $map = [
@@ -303,7 +328,9 @@ if ($isLoggedIn && isset($_GET['print_invoice'])) {
 
 // Liefert die unveränderliche Archiv-Kopie aus (siehe archiveInvoiceHtml) statt einer
 // Live-Neuberechnung – zum lokalen Sichern/Abgleichen der Rechnungsarchiv-Dateien.
-if ($isLoggedIn && isset($_GET['download_archive'])) {
+// Erreichbar per Admin-Login ODER per sync_token (siehe archiveSyncTokenValid) für die
+// monatliche Scheduled-Task-Routine.
+if (isset($_GET['download_archive']) && ($isLoggedIn || archiveSyncTokenValid($pdo))) {
     $safeNumber = preg_replace('/[^A-Za-z0-9_-]/', '_', (string) $_GET['download_archive']);
     $path = __DIR__ . '/data/rechnungen_archiv/' . $safeNumber . '.html';
     if (!is_file($path)) {
@@ -319,8 +346,8 @@ if ($isLoggedIn && isset($_GET['download_archive'])) {
 
 // Listet alle Rechnungsnummern, für die eine Archiv-Datei existiert (JSON) – damit sich
 // der lokale Ordner DOX\Belege\Rechnungen\ automatisiert mit dem Server abgleichen lässt,
-// ohne jede Nummer einzeln raten/anfragen zu müssen.
-if ($isLoggedIn && isset($_GET['list_archive'])) {
+// ohne jede Nummer einzeln raten/anfragen zu müssen. Gleiche Zugriffsregel wie oben.
+if (isset($_GET['list_archive']) && ($isLoggedIn || archiveSyncTokenValid($pdo))) {
     $dir = __DIR__ . '/data/rechnungen_archiv';
     $numbers = [];
     if (is_dir($dir)) {
@@ -332,6 +359,16 @@ if ($isLoggedIn && isset($_GET['list_archive'])) {
     }
     header('Content-Type: application/json; charset=UTF-8');
     echo json_encode($numbers);
+    exit;
+}
+
+// Zeigt den Sync-Token einmalig an – NUR per Admin-Login erreichbar (nicht per Token
+// selbst, sonst könnte man sich den Token mit dem Token selbst bestätigen lassen).
+// Dient allein dazu, den Token einmalig für die Einrichtung der Scheduled Task
+// auszulesen; erscheint bewusst nirgends sonst in der Oberfläche.
+if ($isLoggedIn && isset($_GET['show_sync_token'])) {
+    header('Content-Type: application/json; charset=UTF-8');
+    echo json_encode(['sync_token' => getArchiveSyncToken($pdo)]);
     exit;
 }
 
