@@ -1,8 +1,265 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
   <meta charset="utf-8">
   <title>Psychologische Beratung Mönchengladbach | Selbstbetrachtung</title>
+
+  <!-- Meta-/OG-/Twitter-Tags + strukturierte Daten hier UND (identisch) im
+       __bundler/template weiter unten: der eigentliche Seiteninhalt wird erst
+       per JS aus dem Bundle entpackt (document.documentElement.replaceWith),
+       daher sonst fuer Social-Media-Crawler, Google-Erstindexierung & Tools
+       ohne JS-Ausfuehrung unsichtbar. Bei Aenderungen an Titel/Beschreibung/
+       OG/JSON-LD im Template bitte hier synchron halten. -->
+
+  <meta name="description" content="Psychologische Beratung &amp; Coaching in Mönchengladbach und bundesweit online. Selbstzahler, vertraulich, per Video, Telefon oder WhatsApp. 60 Minuten für 70 €.">
+  <meta name="keywords" content="Psychologische Beratung online, Online-Beratung, Lebensberatung, Coaching, psychologische Beraterin, innere Klärung, emotionale Entlastung, Stressbewältigung, Selbstreflexion, Neuorientierung">
+  <meta name="author" content="Gabriele Küppers · Selbstbetrachtung">
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <link rel="canonical" href="https://selbstbetrachtung-online.de/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:site_name" content="Selbstbetrachtung">
+  <meta property="og:title" content="Selbstbetrachtung – Psychologische Beratung online">
+  <meta property="og:description" content="Gespräche zur inneren Klärung. Vertrauliche psychologische Online-Beratung für emotionale Entlastung und persönliche Entwicklung.">
+  <meta property="og:image" content="https://selbstbetrachtung-online.de/assets/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Selbstbetrachtung – psychologische Beratung online bei Gabriele Küppers">
+  <meta property="og:url" content="https://selbstbetrachtung-online.de/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Selbstbetrachtung – Psychologische Beratung online">
+  <meta name="twitter:description" content="Vertrauliche psychologische Online-Beratung für innere Klärung und persönliche Entwicklung. 60 Minuten für 70 €, Erstgespräch kostenlos.">
+  <meta name="twitter:image" content="https://selbstbetrachtung-online.de/assets/og-image.jpg">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ProfessionalService",
+    "@id": "https://selbstbetrachtung-online.de/#beratung",
+    "name": "Selbstbetrachtung – Psychologische Beratung online",
+    "image": "https://selbstbetrachtung-online.de/assets/og-image.jpg",
+    "url": "https://selbstbetrachtung-online.de/",
+    "email": "kontakt@selbstbetrachtung-online.de",
+    "telephone": "+4915141357281",
+    "description": "Vertrauliche psychologische Beratung und Coaching online – für innere Klärung, emotionale Entlastung und persönliche Entwicklung.",
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": "Dachsweg 27",
+      "postalCode": "41189",
+      "addressLocality": "Mönchengladbach",
+      "addressRegion": "Nordrhein-Westfalen",
+      "addressCountry": "DE"
+    },
+    "areaServed": [
+      { "@type": "Country", "name": "Deutschland" },
+      { "@type": "State", "name": "Nordrhein-Westfalen" },
+      { "@type": "City", "name": "Mönchengladbach" }
+    ],
+    "availableLanguage": "de",
+    "isAccessibleForFree": false,
+    "priceRange": "€€",
+    "serviceType": "Psychologische Beratung, Coaching, Lebensberatung",
+    "knowsAbout": [
+      "Psychologische Beratung", "Coaching", "Lebensberatung",
+      "Einsamkeit", "Emotionale Belastung", "Stress und Erschöpfung",
+      "Innere Unruhe und Überforderung", "Selbstzweifel", "Selbstreflexion",
+      "Persönliche Entwicklung", "Neuorientierung", "Entscheidungsfindung",
+      "Beziehungsthemen", "Zukunftsängste"
+    ],
+    "founder": { "@id": "https://selbstbetrachtung-online.de/#gabriele" },
+    "employee": { "@id": "https://selbstbetrachtung-online.de/#gabriele" },
+    "makesOffer": [
+      {
+        "@type": "Offer",
+        "name": "Psychologisches Einzelgespräch online",
+        "price": "70.00",
+        "priceCurrency": "EUR",
+        "availability": "https://schema.org/InStock",
+        "itemOffered": {
+          "@type": "Service",
+          "name": "Psychologisches Einzelgespräch online (60 Minuten)",
+          "serviceType": "Psychologische Beratung",
+          "description": "Einzelgespräch von 60 Minuten per Videoanruf, Telefon oder WhatsApp. Die Kosten werden nicht von den Krankenkassen übernommen.",
+          "provider": { "@id": "https://selbstbetrachtung-online.de/#beratung" }
+        }
+      },
+      {
+        "@type": "Offer",
+        "name": "Kostenloses telefonisches Erstgespräch",
+        "price": "0",
+        "priceCurrency": "EUR",
+        "availability": "https://schema.org/InStock",
+        "itemOffered": {
+          "@type": "Service",
+          "name": "Telefonisches Erstgespräch (bis 15 Minuten)",
+          "description": "Unverbindliches Kennenlerngespräch am Telefon von bis zu 15 Minuten – kostenlos.",
+          "provider": { "@id": "https://selbstbetrachtung-online.de/#beratung" }
+        }
+      }
+    ]
+  }
+  </script>
+
+  <!-- TODO nach Anlage der Profile: "sameAs" mit Google-Business-Profile- und
+       Verzeichnis-URLs im Person- UND im ProfessionalService-Knoten ergaenzen.
+       Ohne externe Belege koennen KI-Suchsysteme die Entitaet nicht bestaetigen. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://selbstbetrachtung-online.de/#website",
+        "url": "https://selbstbetrachtung-online.de/",
+        "name": "Selbstbetrachtung",
+        "alternateName": "Selbstbetrachtung – Psychologische Beratung online",
+        "inLanguage": "de-DE",
+        "publisher": { "@id": "https://selbstbetrachtung-online.de/#beratung" }
+      },
+      {
+        "@type": "WebPage",
+        "@id": "https://selbstbetrachtung-online.de/#webpage",
+        "url": "https://selbstbetrachtung-online.de/",
+        "name": "Selbstbetrachtung – Psychologische Beratung & Coaching online | Gabriele Küppers",
+        "description": "Psychologische Beratung online für innere Klärung, emotionale Entlastung und persönliche Entwicklung. 60 Minuten für 70 €, telefonisches Erstgespräch bis 15 Minuten kostenlos.",
+        "isPartOf": { "@id": "https://selbstbetrachtung-online.de/#website" },
+        "about": { "@id": "https://selbstbetrachtung-online.de/#beratung" },
+        "mainEntity": { "@id": "https://selbstbetrachtung-online.de/#beratung" },
+        "inLanguage": "de-DE",
+        "dateModified": "2026-08-16"
+      },
+      {
+        "@type": "Person",
+        "@id": "https://selbstbetrachtung-online.de/#gabriele",
+        "name": "Gabriele Küppers",
+        "jobTitle": "Psychologische Beraterin (Personal Coach)",
+        "description": "Gabriele Küppers ist zertifizierte psychologische Beraterin und Personal Coach in Mönchengladbach und berät Erwachsene deutschlandweit online.",
+        "url": "https://selbstbetrachtung-online.de/#ueber-mich",
+        "worksFor": { "@id": "https://selbstbetrachtung-online.de/#beratung" },
+        "knowsLanguage": { "@type": "Language", "name": "Deutsch", "alternateName": "de" },
+        "workLocation": {
+          "@type": "Place",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Mönchengladbach",
+            "addressRegion": "Nordrhein-Westfalen",
+            "addressCountry": "DE"
+          }
+        },
+        "alumniOf": {
+          "@type": "EducationalOrganization",
+          "name": "Schule für Freie Gesundheitsberufe · Impulse e.V.",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Wuppertal",
+            "addressCountry": "DE"
+          }
+        },
+        "hasCredential": {
+          "@type": "EducationalOccupationalCredential",
+          "name": "Psychologische Beraterin (Personal Coach)",
+          "credentialCategory": "Zertifikat",
+          "educationalLevel": "Fachausbildung",
+          "dateCreated": "2022",
+          "recognizedBy": {
+            "@type": "EducationalOrganization",
+            "name": "Schule für Freie Gesundheitsberufe · Impulse e.V., Wuppertal"
+          }
+        }
+      }
+    ]
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "@id": "https://selbstbetrachtung-online.de/#faq",
+    "inLanguage": "de-DE",
+    "mainEntityOfPage": { "@id": "https://selbstbetrachtung-online.de/#webpage" },
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Ist die Beratung wirklich vertraulich?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Ja. Alles, was Sie mir anvertrauen, bleibt selbstverständlich vertraulich. Es erfolgt keine Meldung an Krankenkassen, Arbeitgeber oder andere Institutionen. Sie entscheiden in jedem Gespräch selbst, was Sie teilen möchten." }
+      },
+      {
+        "@type": "Question",
+        "name": "Brauche ich eine bestimmte App oder technische Vorkenntnisse?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Nein. Die Beratung findet ganz unkompliziert per Video, Telefon oder WhatsApp statt – je nachdem, womit Sie sich am wohlsten fühlen. Sie benötigen lediglich ein Smartphone, Tablet oder einen Computer mit Internetverbindung." }
+      },
+      {
+        "@type": "Question",
+        "name": "Was ist, wenn ich nicht weiß, ob mein Anliegen passt?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Das ist völlig in Ordnung. Es gibt keine zu kleinen oder zu großen Themen. In einem kurzen Vorgespräch klären wir gemeinsam Ihr Anliegen und schauen in Ruhe, ob die Beratung das Richtige für Sie ist – ganz unverbindlich." }
+      },
+      {
+        "@type": "Question",
+        "name": "Ist eine psychologische Beratung dasselbe wie eine Psychotherapie?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Nein. Die psychologische Beratung dient der persönlichen Klärung, Reflexion und Orientierung. Sie ersetzt keine ärztliche oder psychotherapeutische Behandlung und stellt keine Heilbehandlung im Sinne des Heilpraktikergesetzes dar. Bei einer akuten Erkrankung oder Krise wenden Sie sich bitte an ärztliche oder therapeutische Stellen." }
+      },
+      {
+        "@type": "Question",
+        "name": "Ist eine Online-Beratung genauso wirksam wie ein Gespräch vor Ort?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Studien zeigen vergleichbare Wirksamkeit zu Präsenzgesprächen. Viele Menschen öffnen sich sogar leichter aus der vertrauten Umgebung zu Hause statt in einer fremden Praxis." }
+      },
+      {
+        "@type": "Question",
+        "name": "Wie läuft die Bezahlung ab?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Ein Einzelgespräch von 60 Minuten kostet 70 €. Die Kosten werden nicht von den Krankenkassen übernommen. Die Details zur Bezahlung besprechen wir im Vorfeld transparent miteinander." }
+      },
+      {
+        "@type": "Question",
+        "name": "Wie schnell bekomme ich eine Antwort?",
+        "acceptedAnswer": { "@type": "Answer", "text": "In der Regel antworte ich innerhalb von 24 Stunden auf Ihre Nachricht. Anschließend finden wir gemeinsam einen Termin, der gut in Ihren Alltag passt." }
+      },
+      {
+        "@type": "Question",
+        "name": "Muss ich mit einer Wartezeit rechnen?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Psychologische Beratung ist nicht an die Vergabe von Kassen-Therapieplätzen gebunden: Es gibt keine Warteliste und keine Genehmigung durch eine Krankenkasse. Auf Ihre Nachricht antworte ich in der Regel innerhalb von 24 Stunden, den konkreten Termin stimmen wir anschließend individuell ab." }
+      },
+      {
+        "@type": "Question",
+        "name": "Wie viele Gespräche brauche ich?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Es gibt keine feste Mindestanzahl und keine Vertragsbindung. Manche Anliegen klären sich in einem einzigen Gespräch, andere brauchen eine Begleitung über mehrere Termine. Der Beratungsvertrag kann jederzeit und ohne Begründung von beiden Seiten beendet werden." }
+      },
+      {
+        "@type": "Question",
+        "name": "Kann ich anonym bleiben – entsteht ein Eintrag in einer Akte?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Es wird keine Diagnose gestellt, es entsteht kein Eintrag in einer medizinischen Akte und es erfolgt keine Meldung an Krankenkassen, Arbeitgeber oder andere Institutionen. Über den Gesprächsverlauf führe ich ein internes Protokoll, das ausschließlich der Dokumentation dient, der Schweigepflicht nach § 203 StGB unterliegt und in das Sie jederzeit Einsicht nehmen können. Sie entscheiden in jedem Gespräch selbst, was Sie von sich preisgeben." }
+      },
+      {
+        "@type": "Question",
+        "name": "Werden die Gespräche aufgezeichnet?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Nein. Eine Aufzeichnung der Beratungsgespräche erfolgt grundsätzlich nicht – weder per Videoanruf noch per Telefon." }
+      },
+      {
+        "@type": "Question",
+        "name": "Wie sicher ist die Kontaktaufnahme per WhatsApp?",
+        "acceptedAnswer": { "@type": "Answer", "text": "WhatsApp-Nachrichten sind Ende-zu-Ende-verschlüsselt. Ihre Telefonnummer und die Metadaten verarbeitet WhatsApp jedoch eigenverantwortlich – darauf habe ich keinen Einfluss. Wenn Ihnen das wichtig ist, nutzen Sie für die Kontaktaufnahme bitte E-Mail oder Telefon. Das Beratungsgespräch selbst können Sie unabhängig davon per Videoanruf oder Telefon führen." }
+      },
+      {
+        "@type": "Question",
+        "name": "Was gilt, wenn ich einen Termin absagen muss?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Einen vereinbarten Termin können Sie bis 24 Stunden vorher kostenlos absagen oder verschieben. Bei einer späteren Absage oder bei Nichterscheinen wird eine Ausfallgebühr in Höhe des vollen Honorars fällig." }
+      },
+      {
+        "@type": "Question",
+        "name": "Muss ich nach Mönchengladbach kommen?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Nein. Die Beratung findet vollständig online statt – per Videoanruf, Telefon oder WhatsApp. Der Sitz von Selbstbetrachtung ist Mönchengladbach, beraten wird deutschlandweit. Eine Praxis für persönliche Termine vor Ort gibt es nicht." }
+      },
+      {
+        "@type": "Question",
+        "name": "Was tue ich in einer akuten Krise?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Für akute Krisen ist psychologische Beratung nicht das richtige Angebot. Wenn Sie sich in einer akuten Notlage befinden oder Suizidgedanken haben, wenden Sie sich bitte sofort an die Telefonseelsorge unter 0800 111 0 111 oder 0800 111 0 222 (kostenfrei, rund um die Uhr), an den ärztlichen Bereitschaftsdienst unter 116 117 oder im Notfall an den Notruf 112." }
+      }
+    ]
+  }
+  </script>
+
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #F4EFE7; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
