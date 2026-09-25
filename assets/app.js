@@ -3,6 +3,7 @@
 ============================================================ */
 (function () {
   "use strict";
+  window.__appReady = true; /* Signal an das Skript im <head>: sonst blendet dieses nach 3 s alle .reveal-Inhalte ein */
 
   /* --- Nav: Schatten beim Scrollen --- */
   var nav = document.getElementById("nav");
