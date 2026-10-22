@@ -1,0 +1,12 @@
+# Diese Datei sperrt jeglichen Web-Zugriff auf den Ordner lib/ (PHP-Klassen und
+# PHPMailer). Die Dateien werden ausschliesslich per PHP "require" im Dateisystem
+# eingebunden - ein Abruf per URL ist nie noetig und waere nur Angriffsflaeche.
+# Kein Geheimnis, kann problemlos versioniert werden.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
