@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 date_default_timezone_set('Europe/Berlin');
 require __DIR__ . '/lib/Booking.php';
@@ -18,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
         $booking = $result['booking'];
 
         // Praxis per E-Mail informieren (best effort)
-        $configFile = __DIR__ . '/smtp_config.php';
+        $configFile = appConfigFile('smtp_config.php');
         if (file_exists($configFile)) {
             require $configFile;
             require __DIR__ . '/lib/PHPMailer/src/Exception.php';

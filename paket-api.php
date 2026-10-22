@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 date_default_timezone_set('Europe/Berlin');
 header('Content-Type: application/json; charset=utf-8');
@@ -43,7 +44,7 @@ if ($isHoneypotTriggered || $isTooFast) {
     respond(['ok' => false, 'error' => 'Bitte versuchen Sie es erneut.'], 422);
 }
 
-$smtpConfigFile = __DIR__ . '/smtp_config.php';
+$smtpConfigFile = appConfigFile('smtp_config.php');
 if (file_exists($smtpConfigFile)) {
     require $smtpConfigFile;
 }
@@ -119,10 +120,10 @@ $description = Pakete::HOURS_TOTAL_DEFAULT . '-Stunden-Paket – Selbstbetrachtu
 $cancelUrl = baseUrl() . '/paket-kaufen.php';
 
 if ($provider === 'stripe') {
-    if (!file_exists(__DIR__ . '/stripe_config.php')) {
+    if (!file_exists(appConfigFile('stripe_config.php'))) {
         respond(['ok' => false, 'error' => 'Online-Zahlung ist derzeit nicht verfügbar.'], 500);
     }
-    require __DIR__ . '/stripe_config.php';
+    require appConfigFile('stripe_config.php');
     $successUrl = baseUrl() . '/payment-erfolg.php?provider=stripe&kind=package&ref=' . $pending['id'] . '&session_id={CHECKOUT_SESSION_ID}';
     $result = Payments::createStripeCheckoutSession(
         Pakete::PRICE_CENTS_DEFAULT,
@@ -133,10 +134,10 @@ if ($provider === 'stripe') {
         $email
     );
 } else {
-    if (!file_exists(__DIR__ . '/paypal_config.php')) {
+    if (!file_exists(appConfigFile('paypal_config.php'))) {
         respond(['ok' => false, 'error' => 'Online-Zahlung ist derzeit nicht verfügbar.'], 500);
     }
-    require __DIR__ . '/paypal_config.php';
+    require appConfigFile('paypal_config.php');
     $returnUrl = baseUrl() . '/payment-erfolg.php?provider=paypal&kind=package&ref=' . $pending['id'];
     $result = Payments::createPaypalOrder(
         Pakete::PRICE_CENTS_DEFAULT,

@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/Config.php';
 
 /**
  * E-Mail-Versand, der von mehreren Zahlungs-Endpunkten gebraucht wird
@@ -41,7 +42,7 @@ function sendSessionPaidConfirmation(int $bookingId): void
         return;
     }
 
-    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    $smtpConfigFile = appConfigFile('smtp_config.php');
     if (!file_exists($smtpConfigFile)) {
         return;
     }
@@ -121,7 +122,7 @@ function sendPackagePaidConfirmation(int $packageId): void
         return;
     }
 
-    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    $smtpConfigFile = appConfigFile('smtp_config.php');
     if (!file_exists($smtpConfigFile)) {
         return;
     }
@@ -207,7 +208,7 @@ function sendPackageRedeemedConfirmation(int $bookingId, int $packageId): void
         return;
     }
 
-    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    $smtpConfigFile = appConfigFile('smtp_config.php');
     if (!file_exists($smtpConfigFile)) {
         return;
     }
@@ -294,7 +295,7 @@ function sendAdminCancellationNotice(int $bookingId, string $paymentStatusAfterC
         return;
     }
 
-    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    $smtpConfigFile = appConfigFile('smtp_config.php');
     if (!file_exists($smtpConfigFile)) {
         return;
     }
@@ -363,7 +364,7 @@ function sendRefundProcessedNotice(int $bookingId): void
         return;
     }
 
-    $smtpConfigFile = __DIR__ . '/../smtp_config.php';
+    $smtpConfigFile = appConfigFile('smtp_config.php');
     if (!file_exists($smtpConfigFile)) {
         return;
     }

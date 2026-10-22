@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 /**
  * Öffentliche Zahlseite für einen bereits gebuchten Folgetermin. Nur über den
@@ -80,8 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'name' => $booking['name'], 'address' => null, 'email' => $booking['email'], 'phone' => $booking['phone'], 'geburtsdatum' => null,
         ]);
 
-        if ($provider === 'stripe' && file_exists(__DIR__ . '/stripe_config.php')) {
-            require __DIR__ . '/stripe_config.php';
+        if ($provider === 'stripe' && file_exists(appConfigFile('stripe_config.php'))) {
+            require appConfigFile('stripe_config.php');
             $successUrl = $baseUrl . '/payment-erfolg.php?provider=stripe&kind=session&ref=' . $booking['id'] . '&session_id={CHECKOUT_SESSION_ID}';
             $result = Payments::createStripeCheckoutSession(
                 $priceCents,
@@ -91,8 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ['kind' => 'session', 'reference_id' => (string) $booking['id']],
                 $booking['email'] ?: null
             );
-        } elseif ($provider === 'paypal' && file_exists(__DIR__ . '/paypal_config.php')) {
-            require __DIR__ . '/paypal_config.php';
+        } elseif ($provider === 'paypal' && file_exists(appConfigFile('paypal_config.php'))) {
+            require appConfigFile('paypal_config.php');
             $returnUrl = $baseUrl . '/payment-erfolg.php?provider=paypal&kind=session&ref=' . $booking['id'];
             $result = Payments::createPaypalOrder($priceCents, $description, $returnUrl, $cancelUrl, 'session:' . $booking['id']);
         } else {

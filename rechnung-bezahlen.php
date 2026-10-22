@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 /**
  * Öffentliche Zahlseite für eine einzelne, von der Praxis freigegebene
@@ -39,8 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $description = 'Rechnung ' . $invoice['invoice_number'] . ' – Selbstbetrachtung';
     $cancelUrl = $baseUrl . '/rechnung-bezahlen.php?token=' . urlencode($token);
 
-    if ($provider === 'stripe' && file_exists(__DIR__ . '/stripe_config.php')) {
-        require __DIR__ . '/stripe_config.php';
+    if ($provider === 'stripe' && file_exists(appConfigFile('stripe_config.php'))) {
+        require appConfigFile('stripe_config.php');
         $successUrl = $baseUrl . '/payment-erfolg.php?provider=stripe&kind=invoice&ref=' . $invoice['id'] . '&session_id={CHECKOUT_SESSION_ID}';
         $result = Payments::createStripeCheckoutSession(
             (int) $invoice['amount_cents'],
@@ -55,8 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         $errorMessage = $result['error'] ?? 'Die Zahlung konnte nicht gestartet werden.';
-    } elseif ($provider === 'paypal' && file_exists(__DIR__ . '/paypal_config.php')) {
-        require __DIR__ . '/paypal_config.php';
+    } elseif ($provider === 'paypal' && file_exists(appConfigFile('paypal_config.php'))) {
+        require appConfigFile('paypal_config.php');
         $returnUrl = $baseUrl . '/payment-erfolg.php?provider=paypal&kind=invoice&ref=' . $invoice['id'];
         $result = Payments::createPaypalOrder(
             (int) $invoice['amount_cents'],

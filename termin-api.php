@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 date_default_timezone_set('Europe/Berlin');
 header('Content-Type: application/json; charset=utf-8');
@@ -79,7 +80,7 @@ if ($action === 'book' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(['ok' => false, 'error' => 'Bitte versuchen Sie es erneut.'], 422);
     }
 
-    $configFile = __DIR__ . '/smtp_config.php';
+    $configFile = appConfigFile('smtp_config.php');
     if (!file_exists($configFile)) {
         respond(['ok' => false, 'error' => 'Server-Konfiguration fehlt.'], 500);
     }

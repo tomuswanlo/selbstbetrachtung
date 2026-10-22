@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 /**
  * Rückkehr-Seite nach dem Checkout.
@@ -34,7 +35,7 @@ $errorMessage = '';
 
 if ($provider === 'paypal' && in_array($kind, ['package', 'session', 'invoice'], true) && $refId > 0) {
     $orderId = $_GET['token'] ?? ''; // von PayPal automatisch an return_url angehängt
-    $configFile = __DIR__ . '/paypal_config.php';
+    $configFile = appConfigFile('paypal_config.php');
     if ($orderId === '' || !file_exists($configFile)) {
         $status = 'error';
         $errorMessage = 'Die Zahlung konnte nicht bestätigt werden.';

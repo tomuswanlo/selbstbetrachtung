@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -9,7 +10,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$configFile = __DIR__ . '/smtp_config.php';
+$configFile = appConfigFile('smtp_config.php');
 if (!file_exists($configFile)) {
     http_response_code(500);
     echo json_encode(['ok' => false, 'error' => 'Server-Konfiguration fehlt.']);

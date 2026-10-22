@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 /**
  * Server-zu-Server-Bestätigung von Stripe/PayPal – DIES ist die verbindliche
@@ -31,7 +32,7 @@ function parseContextRef(string $customId): ?array
 }
 
 if ($provider === 'stripe') {
-    $configFile = __DIR__ . '/stripe_config.php';
+    $configFile = appConfigFile('stripe_config.php');
     if (!file_exists($configFile)) {
         http_response_code(500);
         exit;
@@ -85,7 +86,7 @@ if ($provider === 'stripe') {
 }
 
 if ($provider === 'paypal') {
-    $configFile = __DIR__ . '/paypal_config.php';
+    $configFile = appConfigFile('paypal_config.php');
     if (!file_exists($configFile)) {
         http_response_code(500);
         exit;

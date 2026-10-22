@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 date_default_timezone_set('Europe/Berlin');
 require_once __DIR__ . '/lib/AdminSecurity.php';
@@ -10,7 +11,7 @@ require __DIR__ . '/lib/Buchhaltung.php';
 require __DIR__ . '/lib/Pakete.php';
 require __DIR__ . '/lib/Notifications.php';
 
-$configFile = __DIR__ . '/termin_admin_config.php';
+$configFile = appConfigFile('termin_admin_config.php');
 if (!file_exists($configFile)) {
     http_response_code(500);
     exit('Admin-Konfiguration fehlt (termin_admin_config.php). Siehe smtp_config.php als Vorbild.');

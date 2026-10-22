@@ -1,11 +1,12 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/lib/Config.php';
 
 date_default_timezone_set('Europe/Berlin');
 require_once __DIR__ . '/lib/AdminSecurity.php';
 AdminSecurity::startSession();
 
-$configFile = __DIR__ . '/termin_admin_config.php';
+$configFile = appConfigFile('termin_admin_config.php');
 if (!file_exists($configFile)) {
     http_response_code(500);
     exit('Admin-Konfiguration fehlt (termin_admin_config.php). Siehe smtp_config.php als Vorbild.');
@@ -211,6 +212,11 @@ $currentPhotoUrl = '/about-photo.php?v=' . time(); // Cache-Buster, damit die Vo
   .dropzone{ border:2px dashed var(--cream-dark); border-radius:12px; padding:1.5rem; text-align:center; color:var(--ink-mute); }
   .dropzone input[type=file]{ margin-top:.75rem; }
   .note{ background:#fff; border-left:3px solid var(--gold); border-radius:8px; padding:.9rem 1.1rem; font-size:.9rem; color:var(--ink-mute); margin-top:1.1rem; }
+  table.cfg{ width:100%; border-collapse:collapse; font-size:.92rem; margin-top:.6rem; }
+  table.cfg td{ padding:.5rem .3rem; border-bottom:1px solid var(--cream-dark); vertical-align:top; }
+  .st-ok{ color:#3E7A56; font-weight:700; }
+  .st-warn{ color:var(--gold-dark); font-weight:700; }
+  code{ background:#fff; border:1px solid var(--cream-dark); border-radius:6px; padding:.05rem .35rem; font-size:.85em; word-break:break-all; }
 </style>
 </head>
 <body>
@@ -277,6 +283,32 @@ $currentPhotoUrl = '/about-photo.php?v=' . time(); // Cache-Buster, damit die Vo
     <div class="note">
       Hinweis: Falls der Hintergrund des neuen Fotos KI-generiert ist, muss der Text-Hinweis unterhalb des Fotos auf der Startseite („Hinweis: Der Bildhintergrund wurde mit KI erstellt.") von Hand angepasst werden – das übernimmt diese Seite hier nicht automatisch. Bitte in diesem Fall kurz Bescheid geben.
     </div>
+  </section>
+
+  <?php
+  $configLabels = [
+      'smtp_config.php' => 'E-Mail-Versand (SMTP, Turnstile)',
+      'termin_admin_config.php' => 'Admin-Passwort',
+      'stripe_config.php' => 'Stripe (Kartenzahlung)',
+      'paypal_config.php' => 'PayPal',
+  ];
+  ?>
+  <section class="card">
+    <h2>Konfigurationsdateien (Ablageort)</h2>
+    <p class="muted">Dateien mit Zugangsdaten gehören außerhalb des Web-Roots in den Ordner <code><?= htmlspecialchars(appConfigDir()) ?></code>. Liegen sie noch im Web-Root, werden sie von dort gelesen (per <code>.htaccess</code> gesperrt) – erst nach dem Umzug wird jede Zeile unten grün. Inhalte werden hier nie angezeigt.</p>
+    <table class="cfg">
+      <?php foreach ($configLabels as $configName => $configLabel): ?>
+        <?php $loc = appConfigLocation($configName); ?>
+        <tr>
+          <td><strong><?= htmlspecialchars($configLabel) ?></strong><br><span class="muted"><?= htmlspecialchars($configName) ?></span></td>
+          <td>
+            <?php if ($loc === 'ausserhalb'): ?><span class="st-ok">✓ außerhalb des Web-Roots</span>
+            <?php elseif ($loc === 'webroot'): ?><span class="st-warn">⚠ noch im Web-Root</span><br><span class="muted">funktioniert, soll aber umziehen</span>
+            <?php else: ?><span class="muted">– nicht vorhanden</span><?php endif; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+    </table>
   </section>
 
 <?php endif; ?>
