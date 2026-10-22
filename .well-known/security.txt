@@ -1,0 +1,7 @@
+# Sicherheitshinweise zu selbstbetrachtung-online.de (RFC 9116)
+# Schwachstellen bitte vertraulich per E-Mail melden und dabei keine Gesundheits-
+# oder Klientendaten mitschicken - eine Beschreibung des Problems genuegt.
+Contact: mailto:kontakt@selbstbetrachtung-online.de
+Expires: 2027-10-01T00:00:00.000Z
+Preferred-Languages: de, en
+Canonical: https://selbstbetrachtung-online.de/.well-known/security.txt
