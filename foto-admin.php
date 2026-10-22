@@ -2,7 +2,8 @@
 declare(strict_types=1);
 
 date_default_timezone_set('Europe/Berlin');
-session_start();
+require_once __DIR__ . '/lib/AdminSecurity.php';
+AdminSecurity::startSession();
 
 $configFile = __DIR__ . '/termin_admin_config.php';
 if (!file_exists($configFile)) {
@@ -121,11 +122,19 @@ $loginError = null;
 // --- Login -----------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['do'] ?? '') === 'login') {
     $submitted = (string) ($_POST['password'] ?? '');
-    if (hash_equals(TERMIN_ADMIN_PASSWORD, $submitted)) {
+    $blockedFor = AdminSecurity::blockedSeconds();
+    if ($blockedFor > 0) {
+        http_response_code(429);
+        header('Retry-After: ' . $blockedFor);
+        $loginError = AdminSecurity::blockedMessage($blockedFor);
+        $isLoggedIn = false;
+    } elseif (hash_equals(TERMIN_ADMIN_PASSWORD, $submitted)) {
+        AdminSecurity::clearFailures();
         session_regenerate_id(true);
         $_SESSION['termin_admin'] = true;
         redirectBack();
     } else {
+        AdminSecurity::recordFailure();
         usleep(500000); // Brute-Force ein wenig ausbremsen
         $loginError = 'Falsches Passwort.';
         $isLoggedIn = false;

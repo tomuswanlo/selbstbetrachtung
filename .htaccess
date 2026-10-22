@@ -1,0 +1,21 @@
+# Sicherheits-Header fuer alle Antworten, die ueber Apache laufen (alle PHP-Seiten:
+# Buchung, Zahlung, Admin-Bereiche, Blog). Statische Dateien (index.html, assets/)
+# liefert Plesk standardmaessig direkt per nginx aus - dafuer die nginx-Zeilen aus
+# PROJECT-HANDOFF.md (Abschnitt "Sicherheit") in Plesk eintragen.
+#
+# - HSTS: Browser nutzen fuer 180 Tage nur noch HTTPS (ohne includeSubDomains/preload;
+#   bei stabilem Betrieb spaeter auf 31536000 erhoehen).
+# - frame-ancestors/X-Frame-Options: Seiten duerfen nicht fremd eingebettet werden
+#   (Clickjacking-Schutz, relevant fuer Admin-Login und Zahlungsseiten).
+# - base-uri/object-src: bewusst KEINE script-src-/style-src-Beschraenkung - die Seite
+#   nutzt Inline-Skripte/-Styles und Cloudflare Turnstile; eine strengere CSP braeuchte Tests.
+<IfModule mod_headers.c>
+    Header always set Strict-Transport-Security "max-age=15552000"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Header always set Content-Security-Policy "frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
+</IfModule>
